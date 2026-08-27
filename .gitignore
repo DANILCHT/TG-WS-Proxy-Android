@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Signing — never commit keys or passwords
+keystore.properties
+*.jks
+*.keystore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

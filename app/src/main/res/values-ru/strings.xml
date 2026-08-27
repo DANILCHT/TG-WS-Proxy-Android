@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TG WS Proxy</string>
+
+    <string name="status_running">Работает</string>
+    <string name="status_stopped">Остановлен</string>
+
+    <string name="stat_up">Отправлено</string>
+    <string name="stat_down">Получено</string>
+    <string name="stat_active">Активных</string>
+    <string name="stat_route">Канал</string>
+    <string name="route_ws">WS</string>
+    <string name="route_cf">CF</string>
+    <string name="route_tcp">TCP</string>
+    <string name="route_mixed">разные</string>
+
+    <string name="action_start">Запустить прокси</string>
+    <string name="action_stop">Стоп</string>
+    <string name="action_stop_proxy">Остановить прокси</string>
+    <string name="action_open_telegram">Открыть в Telegram</string>
+    <string name="action_copy_link">Скопировать ссылку</string>
+    <string name="action_save">Сохранить настройки</string>
+    <string name="action_regenerate_secret">Сгенерировать новый secret</string>
+    <string name="action_copy_logs">Копировать логи</string>
+    <string name="action_clear_logs">Очистить логи</string>
+    <string name="action_restart">Перезапустить</string>
+    <string name="action_expand">Развернуть раздел</string>
+
+    <string name="section_connection">Подключение MTProto</string>
+    <string name="section_connection_sub">Адрес, порт и secret для Telegram</string>
+    <string name="section_evasion">Обход блокировок</string>
+    <string name="section_evasion_sub">Помогает на мобильном интернете с фильтрацией</string>
+    <string name="section_masking">Маскировка</string>
+    <string name="section_masking_sub">Сделать локальное соединение похожим на TLS</string>
+    <string name="section_fallback">Резервные каналы</string>
+    <string name="section_fallback_sub">Используются, когда WebSocket недоступен</string>
+    <string name="section_advanced">Дополнительно</string>
+    <string name="section_advanced_sub">Скорость, автозапуск, диагностика</string>
+    <string name="section_logs">Логи и статистика</string>
+    <string name="section_logs_sub">Пригодится, если что-то не работает</string>
+
+    <string name="field_host">IP-адрес прослушивания</string>
+    <string name="hint_host">127.0.0.1 — только это устройство. 0.0.0.0 — доступен всей локальной сети.</string>
+    <string name="field_port">Порт</string>
+    <string name="help_port">Любой свободный порт от 1 до 65535. В Telegram укажите такой же.</string>
+    <string name="field_secret">Secret (32 hex-символа)</string>
+    <string name="help_secret">Пароль, по которому Telegram подключается к прокси. Никому не сообщайте; после смены прокси нужно добавить заново.</string>
+    <string name="field_dc_ip">Датацентры (DC:IP, через запятую)</string>
+    <string name="hint_dc_ip">По умолчанию: 2:149.154.167.220, 4:149.154.167.220. Если не грузятся фото и видео — очистите поле.</string>
+
+    <string name="field_tls_split">Разрезать TLS-рукопожатие</string>
+    <string name="help_tls_split">Первый пакет соединения уходит двумя частями, так что имя домена оказывается разрезано пополам. Обходит фильтры, которые смотрят только на первый пакет, — обычный случай на мобильном интернете. Ничего не замедляет, можно держать включённым.</string>
+    <string name="field_tls_split_delay">Пауза между частями, мс</string>
+    <string name="help_tls_split_delay">0 — отправить обе части сразу. 10–50 мс помогает против фильтров, которые собирают пакеты вместе, но добавляет эту задержку к каждому новому соединению.</string>
+    <string name="field_fronting_first">Сразу подставлять нейтральный домен</string>
+    <string name="help_fronting_first">Обычно приложение сначала пробует домен Telegram и подставляет нейтральный только после таймаута. Включите, чтобы подставлять сразу, — экономит 5–7 секунд на подключение в сети, которая блокирует Telegram по имени.</string>
+    <string name="field_fronting_sni">Нейтральный домен</string>
+    <string name="help_fronting_sni">Имя, которое видит сеть вместо домена Telegram. Подойдёт любой сайт, который оператор не блокирует.</string>
+    <string name="field_bypass_vpn">Не пускать через VPN</string>
+    <string name="help_bypass_vpn">Пока включён VPN, прокси держит свои соединения в обычной сети, поэтому трафик Telegram идёт мимо VPN. На другие приложения не влияет. Если VPN запрещает соединения вне туннеля, приложение вернётся к работе через него и напишет об этом в лог.</string>
+
+    <string name="field_fake_tls">Домен Fake TLS (необязательно)</string>
+    <string name="hint_fake_tls">Оборачивает соединение между Telegram и приложением в то, что похоже на TLS к указанному сайту. Касается только локального участка.</string>
+
+    <string name="field_cfproxy">Резерв через Cloudflare Proxy</string>
+    <string name="help_cfproxy">Если прямой WebSocket не проходит, подключаться через публичные домены за Cloudflare. Медленнее, но обычно работает.</string>
+    <string name="field_cf_user_domain">Использовать свои домены Cloudflare</string>
+    <string name="help_cf_user_domain">Ваши собственные домены за Cloudflare вместо публичных. Требуют настройки на стороне Cloudflare.</string>
+    <string name="field_cf_user_domain_hint">Домены через запятую</string>
+    <string name="field_cf_worker">Резерв через Cloudflare Worker</string>
+    <string name="help_cf_worker">Канал через ваш собственный Cloudflare Worker. Пробуется раньше CF-прокси.</string>
+    <string name="field_cf_worker_hint">Домены Worker через запятую</string>
+
+    <string name="field_pool_size">Пул WebSocket-сессий на DC</string>
+    <string name="help_pool_size">Соединения, открытые заранее, чтобы Telegram подключался мгновенно. Больше — быстрее старт и чуть больше расход батареи. 0 отключает пул.</string>
+    <string name="field_buf_kb">Буфер сокета, КБ</string>
+    <string name="help_buf_kb">Большие значения ускоряют крупные загрузки и занимают больше памяти. 256 КБ подходит почти всегда.</string>
+    <string name="field_force_test_dc">Принудительно тестовые датацентры Telegram</string>
+    <string name="help_force_test_dc">Только для разработчиков. Обычные аккаунты в тестовой сети не работают.</string>
+    <string name="field_autostart">Запускать при включении устройства</string>
+    <string name="help_autostart">Прокси стартует сразу после перезагрузки, без открытия приложения.</string>
+    <string name="field_verbose">Подробное логирование</string>
+    <string name="help_verbose">Пишет в лог подробности по каждому соединению. Включайте на время разбора проблемы.</string>
+
+    <string name="notif_channel_name">Статус прокси</string>
+    <string name="notif_channel_desc">Держит MTProto-прокси работающим в фоне</string>
+    <string name="notif_running">Прокси работает на %1$s:%2$d</string>
+    <string name="notif_starting">Запуск прокси…</string>
+    <string name="notif_traffic">↑%1$s ↓%2$s · активных: %3$d</string>
+
+    <string name="msg_saved">Настройки сохранены</string>
+    <string name="msg_saved_restart">Настройки сохранены, прокси перезапущен</string>
+    <string name="msg_copied">Скопировано в буфер обмена</string>
+    <string name="msg_no_telegram">Telegram не установлен</string>
+    <string name="msg_logs_cleared">Логи очищены</string>
+    <string name="msg_secret_regenerated">Новый secret создан — сохраните, чтобы применить</string>
+    <string name="msg_notif_permission">Разрешение на уведомления нужно, чтобы прокси не выключался в фоне</string>
+
+    <string name="detail_stopped">Нажмите «Запустить», затем добавьте прокси в Telegram</string>
+
+    <string name="menu_about">О программе</string>
+    <string name="about_title">TG WS Proxy</string>
+    <string name="about_body">Локальный MTProto-прокси: пробрасывает трафик Telegram через WebSocket на собственные веб-эндпоинты Telegram, с резервными каналами через Cloudflare и обычный TCP.\n\nНастройка в Telegram: Настройки → Данные и память → Прокси → Добавить прокси → MTProto, укажите host, порт и secret с главного экрана. Кнопка «Открыть в Telegram» заполняет это автоматически.\n\nПрокси слушает только локально и не перехватывает трафик других приложений.\n\nЕсли на мобильном интернете Telegram работает медленно или не подключается — откройте раздел «Обход блокировок», там у каждой настройки есть пояснение.</string>
+    <string name="about_close">Закрыть</string>
+
+    <string name="first_run_title">Добро пожаловать</string>
+    <string name="first_run_body">Прокси слушает %1$s:%2$d, secret:\n\n%3$s\n\nЗапустите его и нажмите «Открыть в Telegram», чтобы добавить прокси автоматически.</string>
+    <string name="first_run_ok">Понятно</string>
+</resources>

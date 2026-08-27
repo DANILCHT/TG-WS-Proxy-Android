@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TG WS Proxy</string>
+
+    <string name="status_running">Running</string>
+    <string name="status_stopped">Stopped</string>
+
+    <string name="placeholder_dash" translatable="false">—</string>
+    <string name="stat_up">Sent</string>
+    <string name="stat_down">Received</string>
+    <string name="stat_active">Active</string>
+    <string name="stat_route">Route</string>
+    <string name="route_ws">WS</string>
+    <string name="route_cf">CF</string>
+    <string name="route_tcp">TCP</string>
+    <string name="route_mixed">mixed</string>
+
+    <string name="action_start">Start proxy</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_stop_proxy">Stop proxy</string>
+    <string name="action_open_telegram">Open in Telegram</string>
+    <string name="action_copy_link">Copy link</string>
+    <string name="action_save">Save settings</string>
+    <string name="action_regenerate_secret">Generate new secret</string>
+    <string name="action_copy_logs">Copy logs</string>
+    <string name="action_clear_logs">Clear logs</string>
+    <string name="action_restart">Restart</string>
+    <string name="action_expand">Expand section</string>
+
+    <string name="section_connection">Connection</string>
+    <string name="section_connection_sub">Address, port and secret for Telegram</string>
+    <string name="section_evasion">Bypass blocking</string>
+    <string name="section_evasion_sub">Helps on mobile networks with filtering</string>
+    <string name="section_masking">Masking</string>
+    <string name="section_masking_sub">Make the local connection look like TLS</string>
+    <string name="section_fallback">Fallback</string>
+    <string name="section_fallback_sub">Routes used when WebSocket is unavailable</string>
+    <string name="section_advanced">Advanced</string>
+    <string name="section_advanced_sub">Performance, autostart, diagnostics</string>
+    <string name="section_logs">Logs and statistics</string>
+    <string name="section_logs_sub">Useful when something does not work</string>
+
+    <string name="field_host">Listen host</string>
+    <string name="hint_host">127.0.0.1 — this device only. 0.0.0.0 — reachable by the whole local network.</string>
+    <string name="field_port">Listen port</string>
+    <string name="help_port">Any free port from 1 to 65535. Use the same value in Telegram.</string>
+    <string name="field_secret">Secret (32 hex chars)</string>
+    <string name="help_secret">The password Telegram authenticates with. Keep it private; regenerating it means re-adding the proxy.</string>
+    <string name="field_dc_ip">DC IPs (DC:IP, comma separated)</string>
+    <string name="hint_dc_ip">Default: 2:149.154.167.220, 4:149.154.167.220. Clear the field if photos and videos do not load.</string>
+
+    <string name="field_tls_split">Split TLS handshake</string>
+    <string name="help_tls_split">Sends the first packet of an upstream connection in two parts, so the domain name is cut in half. Defeats filters that only look at the first packet — the usual case on mobile networks. Costs nothing; leave it on.</string>
+    <string name="field_tls_split_delay">Pause between parts, ms</string>
+    <string name="help_tls_split_delay">0 — send both parts immediately. 10–50 ms helps against filters that reassemble packets, but adds that delay to every new connection.</string>
+    <string name="field_fronting_first">Use a neutral domain first</string>
+    <string name="help_fronting_first">Normally the app tries Telegram\'s own domain first and only substitutes a neutral one after a timeout. Enable this to substitute right away — saves 5–7 seconds per connection on a network that blocks Telegram by name.</string>
+    <string name="field_fronting_sni">Neutral domain</string>
+    <string name="help_fronting_sni">The name shown to the network instead of Telegram\'s. Must be a site your operator does not block.</string>
+    <string name="field_bypass_vpn">Keep out of the VPN tunnel</string>
+    <string name="help_bypass_vpn">While a VPN is up, the proxy keeps its own connections on the normal network, so Telegram traffic does not go through the VPN. Other apps are unaffected. If the VPN forbids connections outside the tunnel, the app falls back to using it and writes that to the log.</string>
+
+    <string name="field_fake_tls">Fake TLS domain (optional)</string>
+    <string name="hint_fake_tls">Wraps the connection between Telegram and this app in something that looks like TLS to the given site. Applies to the local link only.</string>
+
+    <string name="field_cfproxy">Cloudflare proxy fallback</string>
+    <string name="help_cfproxy">If a direct WebSocket fails, connect through public Cloudflare-proxied domains. Slower, but usually works.</string>
+    <string name="field_cf_user_domain">Use my own Cloudflare domains</string>
+    <string name="help_cf_user_domain">Your own domains behind Cloudflare instead of the public ones. Needs setup on the Cloudflare side.</string>
+    <string name="field_cf_user_domain_hint">Domains, comma separated</string>
+    <string name="field_cf_worker">Cloudflare Worker fallback</string>
+    <string name="help_cf_worker">A route through your own Cloudflare Worker. Tried before the CF proxy.</string>
+    <string name="field_cf_worker_hint">Worker domains, comma separated</string>
+
+    <string name="field_pool_size">WS pool size per DC</string>
+    <string name="help_pool_size">Connections opened in advance so Telegram connects instantly. More means faster start and slightly more battery. 0 disables it.</string>
+    <string name="field_buf_kb">Socket buffer, KB</string>
+    <string name="help_buf_kb">Larger values speed up big downloads and use more RAM. 256 KB suits most cases.</string>
+    <string name="field_force_test_dc">Force Telegram TEST datacenters</string>
+    <string name="help_force_test_dc">For developers only. Regular accounts do not work on the test network.</string>
+    <string name="field_autostart">Start on device boot</string>
+    <string name="help_autostart">Starts the proxy right after a reboot, without opening the app.</string>
+    <string name="field_verbose">Verbose logging</string>
+    <string name="help_verbose">Writes details about every connection to the log. Turn on while diagnosing, off afterwards.</string>
+
+    <string name="notif_channel_name">Proxy status</string>
+    <string name="notif_channel_desc">Keeps the MTProto proxy running in the background</string>
+    <string name="notif_running">Proxy running on %1$s:%2$d</string>
+    <string name="notif_starting">Starting proxy…</string>
+    <string name="notif_traffic">↑%1$s ↓%2$s · %3$d active</string>
+
+    <string name="msg_saved">Settings saved</string>
+    <string name="msg_saved_restart">Settings saved, proxy restarted</string>
+    <string name="msg_copied">Copied to clipboard</string>
+    <string name="msg_no_telegram">Telegram is not installed</string>
+    <string name="msg_logs_cleared">Logs cleared</string>
+    <string name="msg_secret_regenerated">New secret generated — save to apply</string>
+    <string name="msg_notif_permission">Notification permission is required to keep the proxy alive in the background</string>
+
+    <string name="detail_stopped">Press Start, then add the proxy in Telegram</string>
+
+    <string name="menu_about">About</string>
+    <string name="about_title">TG WS Proxy</string>
+    <string name="about_body">Local MTProto proxy that bridges Telegram traffic over WebSocket to Telegram\'s own web endpoints, with Cloudflare and plain TCP fallbacks.\n\nSet it up in Telegram: Settings → Data and Storage → Proxy → Add proxy → MTProto, using the host, port and secret shown on the main screen. Tapping “Open in Telegram” fills that in automatically.\n\nThe proxy only listens locally; it does not intercept other apps\' traffic.\n\nIf Telegram is slow or does not connect on mobile data, open “Bypass blocking” — each option there explains what it does.</string>
+    <string name="about_close">Close</string>
+
+    <string name="first_run_title">Welcome</string>
+    <string name="first_run_body">The proxy listens on %1$s:%2$d with secret:\n\n%3$s\n\nStart it, then tap “Open in Telegram” to add the proxy automatically.</string>
+    <string name="first_run_ok">Got it</string>
+</resources>

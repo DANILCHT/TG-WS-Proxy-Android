@@ -1,0 +1,951 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:liftOnScroll="true">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:title="@string/app_name"
+            app:menu="@menu/main" />
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/contentScroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="24dp">
+
+            <!-- ============================== status ============================== -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="3dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/statusDot"
+                            android:layout_width="12dp"
+                            android:layout_height="12dp"
+                            android:layout_marginEnd="10dp"
+                            android:background="@drawable/status_dot" />
+
+                        <TextView
+                            android:id="@+id/statusText"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:text="@string/status_stopped"
+                            android:textAppearance="?attr/textAppearanceHeadline6" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/statusDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:textAppearance="?attr/textAppearanceBody2"
+                        android:textIsSelectable="true" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/toggleButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/action_start"
+                        android:textSize="16sp"
+                        app:cornerRadius="14dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/openTelegramButton"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:text="@string/action_open_telegram"
+                            app:cornerRadius="14dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/copyLinkButton"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:text="@string/action_copy_link"
+                            app:cornerRadius="14dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ============================ live stats ============================ -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/statsCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:visibility="gone"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/statUp"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/placeholder_dash"
+                            android:textAppearance="?attr/textAppearanceSubtitle1"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/stat_up"
+                            android:textAppearance="?attr/textAppearanceCaption" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/statDown"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/placeholder_dash"
+                            android:textAppearance="?attr/textAppearanceSubtitle1"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/stat_down"
+                            android:textAppearance="?attr/textAppearanceCaption" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/statActive"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/placeholder_dash"
+                            android:textAppearance="?attr/textAppearanceSubtitle1"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/stat_active"
+                            android:textAppearance="?attr/textAppearanceCaption" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/statRoute"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/placeholder_dash"
+                            android:textAppearance="?attr/textAppearanceSubtitle1"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/stat_route"
+                            android:textAppearance="?attr/textAppearanceCaption" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ========================= evasion (new) =========================== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/evasionHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_evasion"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_evasion_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/evasionChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/evasionContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/tlsSplitSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/field_tls_split" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_tls_split" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:id="@+id/tlsSplitDelayLayout"
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_tls_split_delay">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/tlsSplitDelayInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="number"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_tls_split_delay" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/frontingFirstSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_fronting_first" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_fronting_first" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_fronting_sni">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/frontingSniInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textUri"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_fronting_sni" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/bypassVpnSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_bypass_vpn" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_bypass_vpn" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- =========================== connection =========================== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/connectionHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_connection"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_connection_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/connectionChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/connectionContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="@string/field_host">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/hostInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="text"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/hint_host" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_port">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/portInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="number"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_port" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_secret">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/secretInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textNoSuggestions"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_secret" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/regenerateSecretButton"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/action_regenerate_secret" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_dc_ip">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/dcIpInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textNoSuggestions"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/hint_dc_ip" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ============================= masking ============================= -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/maskingHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_masking"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_masking_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/maskingChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/maskingContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="@string/field_fake_tls">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/fakeTlsInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textUri"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/hint_fake_tls" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ============================ fallbacks ============================ -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/fallbackHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_fallback"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_fallback_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/fallbackChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/fallbackContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/cfproxySwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/field_cfproxy" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_cfproxy" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/cfUserSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_cf_user_domain" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_cf_user_domain" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:id="@+id/cfUserDomainLayout"
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:hint="@string/field_cf_user_domain_hint">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/cfUserDomainInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textUri"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/cfWorkerSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_cf_worker" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_cf_worker" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:id="@+id/cfWorkerDomainLayout"
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:hint="@string/field_cf_worker_hint">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/cfWorkerDomainInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="textUri"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ============================= advanced ============================ -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/advancedHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_advanced"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_advanced_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/advancedChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/advancedContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="@string/field_pool_size">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/poolSizeInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="number"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_pool_size" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_buf_kb">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/bufKbInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="number"
+                                android:singleLine="true" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_buf_kb" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/forceTestDcSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_force_test_dc" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_force_test_dc" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/autostartSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_autostart" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_autostart" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/verboseSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_verbose" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_verbose" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/saveButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="12dp"
+                android:text="@string/action_save"
+                app:cornerRadius="14dp" />
+
+            <!-- =============================== logs ============================== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/logsHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_logs"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_logs_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/logsChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/logsContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <TextView
+                            android:id="@+id/statsText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="monospace"
+                            android:textAppearance="?attr/textAppearanceCaption"
+                            android:textIsSelectable="true" />
+
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="match_parent"
+                            android:layout_height="240dp"
+                            android:layout_marginTop="8dp"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp">
+
+                            <ScrollView
+                                android:id="@+id/logScroll"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:padding="8dp">
+
+                                <TextView
+                                    android:id="@+id/logText"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:fontFamily="monospace"
+                                    android:textIsSelectable="true"
+                                    android:textSize="11sp" />
+                            </ScrollView>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/copyLogsButton"
+                                style="@style/Widget.MaterialComponents.Button.TextButton"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:layout_height="wrap_content"
+                                android:text="@string/action_copy_logs" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/clearLogsButton"
+                                style="@style/Widget.MaterialComponents.Button.TextButton"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:layout_height="wrap_content"
+                                android:text="@string/action_clear_logs" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

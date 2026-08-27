@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TgWsProxy" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryVariant">@color/primary_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">@color/accent</item>
+        <item name="colorSecondaryVariant">@color/accent</item>
+        <item name="colorOnSecondary">@android:color/white</item>
+        <item name="android:statusBarColor">@color/primary_dark</item>
+    </style>
+
+    <!-- One collapsible settings group. -->
+    <style name="Widget.TgWsProxy.SectionCard" parent="Widget.MaterialComponents.CardView">
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="cardCornerRadius">20dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+
+    <!-- Tappable header row of a settings group. -->
+    <style name="Widget.TgWsProxy.SectionHeader" parent="">
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingBottom">14dp</item>
+    </style>
+
+    <!-- Body of a settings group; hidden until the header is tapped. -->
+    <style name="Widget.TgWsProxy.SectionContent" parent="">
+        <item name="android:orientation">vertical</item>
+        <item name="android:visibility">gone</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingBottom">16dp</item>
+    </style>
+
+    <!-- Short explanation under a field or switch. -->
+    <style name="Widget.TgWsProxy.Help" parent="">
+        <item name="android:textAppearance">?attr/textAppearanceCaption</item>
+        <item name="android:textColor">?android:attr/textColorSecondary</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:lineSpacingExtra">1dp</item>
+    </style>
+</resources>
