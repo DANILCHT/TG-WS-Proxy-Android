@@ -26,6 +26,14 @@
     <string name="action_clear_logs">Clear logs</string>
     <string name="action_restart">Restart</string>
     <string name="action_expand">Expand section</string>
+    <string name="action_check_update">Check for updates</string>
+    <string name="action_notification_settings">System notification settings</string>
+    <string name="action_update_now">Update</string>
+    <string name="action_skip_version">Skip this version</string>
+    <string name="action_later">Later</string>
+    <string name="action_open_releases">Open releases page</string>
+    <string name="action_grant">Allow</string>
+    <string name="action_cancel">Cancel</string>
 
     <string name="section_connection">Connection</string>
     <string name="section_connection_sub">Address, port and secret for Telegram</string>
@@ -39,6 +47,8 @@
     <string name="section_advanced_sub">Performance, autostart, diagnostics</string>
     <string name="section_logs">Logs and statistics</string>
     <string name="section_logs_sub">Useful when something does not work</string>
+    <string name="section_app">Notifications and updates</string>
+    <string name="section_app_sub">Shade appearance and app version</string>
 
     <string name="field_host">Listen host</string>
     <string name="hint_host">127.0.0.1 — this device only. 0.0.0.0 — reachable by the whole local network.</string>
@@ -85,9 +95,30 @@
 
     <string name="notif_channel_name">Proxy status</string>
     <string name="notif_channel_desc">Keeps the MTProto proxy running in the background</string>
+    <string name="notif_channel_quiet_name">Proxy status (quiet)</string>
+    <string name="notif_channel_quiet_desc">Minimal notification without counters or buttons</string>
     <string name="notif_running">Proxy running on %1$s:%2$d</string>
+    <string name="notif_running_quiet">Proxy running</string>
     <string name="notif_starting">Starting proxy…</string>
     <string name="notif_traffic">↑%1$s ↓%2$s · %3$d active</string>
+
+    <string name="field_quiet_notification">Quiet notification</string>
+    <string name="help_quiet_notification">Removes counters and the Stop button, hides the notification from the lock screen and collapses it at the bottom of the shade. Android does not allow removing it completely — a background service without a notification gets killed by the system. To hide it entirely, turn the notification off in system settings; the proxy keeps working, but the system may stop it sooner.</string>
+    <string name="field_auto_update">Check for updates on GitHub</string>
+    <string name="help_auto_update">On startup the app asks GitHub whether a newer version exists, no more than once a day. Nothing is installed without your confirmation: you will see the version, the changes and an Update button. Turn this off to check manually only.</string>
+
+    <string name="version_current">Installed version: %1$s</string>
+    <string name="update_title">Version %1$s available</string>
+    <string name="update_installed">Installed: %1$s</string>
+    <string name="update_none">You have the latest version (%1$s)</string>
+    <string name="update_check_failed">Could not check for updates. GitHub may be unavailable on this network.</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_download_failed">Download failed: %1$s</string>
+    <string name="update_permission_title">Permission required</string>
+    <string name="update_permission_body">To install the update, allow this app to install unknown apps. Android will open the setting; enable it and press Update again.</string>
+    <string name="update_signature_warning">Install the update over the existing app only if it is signed with the same key. Otherwise Android will refuse and you will have to uninstall the app first — settings will be lost.</string>
+    <string name="first_run_update_notice">Update checking on GitHub is enabled: the app will tell you when a new version is out. Nothing installs without your confirmation, and you can turn this off in “Notifications and updates”.</string>
 
     <string name="msg_saved">Settings saved</string>
     <string name="msg_saved_restart">Settings saved, proxy restarted</string>
