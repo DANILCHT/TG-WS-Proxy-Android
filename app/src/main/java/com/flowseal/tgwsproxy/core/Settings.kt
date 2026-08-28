@@ -33,6 +33,10 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         const val KEY_FRONTING_FIRST = "fronting_first"
         const val KEY_FRONTING_SNI = "fronting_sni"
         const val KEY_BYPASS_VPN = "bypass_vpn"
+        const val KEY_QUIET_NOTIFICATION = "quiet_notification"
+        const val KEY_AUTO_UPDATE_CHECK = "auto_update_check"
+        const val KEY_UPDATE_SKIPPED = "update_skipped_version"
+        const val KEY_UPDATE_LAST_CHECK = "update_last_check"
 
         const val DEFAULT_PORT = 1443
         const val DEFAULT_HOST = "127.0.0.1"
@@ -145,6 +149,27 @@ class Settings private constructor(private val prefs: SharedPreferences) {
     var bypassVpn: Boolean
         get() = prefs.getBoolean(KEY_BYPASS_VPN, true)
         set(v) = prefs.edit().putBoolean(KEY_BYPASS_VPN, v).apply()
+
+    /**
+     * Minimal foreground notification: no counters, no buttons, hidden from the
+     * lock screen. A foreground service cannot run with no notification at all.
+     */
+    var quietNotification: Boolean
+        get() = prefs.getBoolean(KEY_QUIET_NOTIFICATION, false)
+        set(v) = prefs.edit().putBoolean(KEY_QUIET_NOTIFICATION, v).apply()
+
+    var autoUpdateCheck: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_UPDATE_CHECK, true)
+        set(v) = prefs.edit().putBoolean(KEY_AUTO_UPDATE_CHECK, v).apply()
+
+    /** Version the user chose to skip, so it is not offered again. */
+    var skippedUpdate: String
+        get() = prefs.getString(KEY_UPDATE_SKIPPED, "").orEmpty()
+        set(v) = prefs.edit().putString(KEY_UPDATE_SKIPPED, v).apply()
+
+    var lastUpdateCheck: Long
+        get() = prefs.getLong(KEY_UPDATE_LAST_CHECK, 0L)
+        set(v) = prefs.edit().putLong(KEY_UPDATE_LAST_CHECK, v).apply()
 
     fun regenerateSecret(): String {
         val fresh = Crypto.randomHex(16)

@@ -25,6 +25,14 @@
     <string name="action_clear_logs">Очистить логи</string>
     <string name="action_restart">Перезапустить</string>
     <string name="action_expand">Развернуть раздел</string>
+    <string name="action_check_update">Проверить обновления</string>
+    <string name="action_notification_settings">Системные настройки уведомлений</string>
+    <string name="action_update_now">Обновить</string>
+    <string name="action_skip_version">Пропустить эту версию</string>
+    <string name="action_later">Позже</string>
+    <string name="action_open_releases">Открыть страницу релизов</string>
+    <string name="action_grant">Разрешить</string>
+    <string name="action_cancel">Отмена</string>
 
     <string name="section_connection">Подключение MTProto</string>
     <string name="section_connection_sub">Адрес, порт и secret для Telegram</string>
@@ -38,6 +46,8 @@
     <string name="section_advanced_sub">Скорость, автозапуск, диагностика</string>
     <string name="section_logs">Логи и статистика</string>
     <string name="section_logs_sub">Пригодится, если что-то не работает</string>
+    <string name="section_app">Уведомления и обновления</string>
+    <string name="section_app_sub">Вид в шторке и версия приложения</string>
 
     <string name="field_host">IP-адрес прослушивания</string>
     <string name="hint_host">127.0.0.1 — только это устройство. 0.0.0.0 — доступен всей локальной сети.</string>
@@ -84,9 +94,30 @@
 
     <string name="notif_channel_name">Статус прокси</string>
     <string name="notif_channel_desc">Держит MTProto-прокси работающим в фоне</string>
+    <string name="notif_channel_quiet_name">Статус прокси (тихо)</string>
+    <string name="notif_channel_quiet_desc">Минимальное уведомление без счётчиков и кнопок</string>
     <string name="notif_running">Прокси работает на %1$s:%2$d</string>
+    <string name="notif_running_quiet">Прокси работает</string>
     <string name="notif_starting">Запуск прокси…</string>
     <string name="notif_traffic">↑%1$s ↓%2$s · активных: %3$d</string>
+
+    <string name="field_quiet_notification">Тихое уведомление</string>
+    <string name="help_quiet_notification">Убирает счётчики и кнопку «Стоп», скрывает уведомление с экрана блокировки и сворачивает его в самый низ шторки. Совсем убрать его Android не позволяет: фоновый сервис без уведомления система выключает. Чтобы спрятать полностью, отключите уведомления в системных настройках — прокси продолжит работать, но система может останавливать его раньше.</string>
+    <string name="field_auto_update">Проверять обновления на GitHub</string>
+    <string name="help_auto_update">При запуске приложение спрашивает у GitHub, есть ли новая версия, не чаще раза в сутки. Ничего не устанавливается без вашего подтверждения: вы увидите версию, список изменений и кнопку «Обновить». Выключите, если хотите проверять только вручную.</string>
+
+    <string name="version_current">Установленная версия: %1$s</string>
+    <string name="update_title">Доступна версия %1$s</string>
+    <string name="update_installed">Установлена: %1$s</string>
+    <string name="update_none">У вас последняя версия (%1$s)</string>
+    <string name="update_check_failed">Не удалось проверить обновления. Возможно, GitHub недоступен в этой сети.</string>
+    <string name="update_checking">Проверяем…</string>
+    <string name="update_downloading">Загрузка… %1$d%%</string>
+    <string name="update_download_failed">Загрузка не удалась: %1$s</string>
+    <string name="update_permission_title">Нужно разрешение</string>
+    <string name="update_permission_body">Чтобы установить обновление, разрешите приложению устанавливать неизвестные приложения. Android откроет нужный экран — включите переключатель и нажмите «Обновить» снова.</string>
+    <string name="update_signature_warning">Обновление встанет поверх только если подписано тем же ключом. Иначе Android откажет, и приложение придётся удалить перед установкой — настройки будут потеряны.</string>
+    <string name="first_run_update_notice">Проверка обновлений на GitHub включена: приложение сообщит, когда выйдет новая версия. Без вашего подтверждения ничего не установится, отключить можно в разделе «Уведомления и обновления».</string>
 
     <string name="msg_saved">Настройки сохранены</string>
     <string name="msg_saved_restart">Настройки сохранены, прокси перезапущен</string>

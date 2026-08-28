@@ -46,6 +46,7 @@ class ProxyService : Service() {
         const val EXTRA_ERROR = "error"
 
         private const val CHANNEL_ID = "proxy_status"
+        private const val CHANNEL_ID_QUIET = "proxy_status_quiet"
         private const val NOTIFICATION_ID = 1001
         private const val STATS_UPDATE_INTERVAL_MS = 5_000L
 
@@ -226,38 +227,85 @@ class ProxyService : Service() {
 
     // ----------------------------------------------------------- notification
 
+    /**
+     * Android requires a visible notification for a foreground service, so the
+     * quiet mode uses a separate IMPORTANCE_MIN channel instead: no traffic
+     * updates, no action button, collapsed in the shade and hidden from the
+     * lock screen. That is as close to "off" as the platform allows.
+     */
+    private fun channelId(): String =
+        if (Settings.get(this).quietNotification) CHANNEL_ID_QUIET else CHANNEL_ID
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < 26) return
         val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.notif_channel_name),
-            NotificationManager.IMPORTANCE_LOW,
-        )
-        channel.description = getString(R.string.notif_channel_desc)
-        channel.setShowBadge(false)
-        nm.createNotificationChannel(channel)
+
+        if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.notif_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            )
+            channel.description = getString(R.string.notif_channel_desc)
+            channel.setShowBadge(false)
+            nm.createNotificationChannel(channel)
+        }
+
+        if (nm.getNotificationChannel(CHANNEL_ID_QUIET) == null) {
+            val quiet = NotificationChannel(
+                CHANNEL_ID_QUIET,
+                getString(R.string.notif_channel_quiet_name),
+                NotificationManager.IMPORTANCE_MIN,
+            )
+            quiet.description = getString(R.string.notif_channel_quiet_desc)
+            quiet.setShowBadge(false)
+            quiet.enableVibration(false)
+            quiet.setSound(null, null)
+            quiet.lockscreenVisibility = Notification.VISIBILITY_SECRET
+            nm.createNotificationChannel(quiet)
+        }
     }
 
     private fun buildNotification(running: Boolean, detail: String?): Notification {
         val settings = Settings.get(this)
+        val quiet = settings.quietNotification
         val openIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             pendingFlags(),
         )
+
+        val title = if (running) {
+            if (quiet) {
+                getString(R.string.notif_running_quiet)
+            } else {
+                getString(R.string.notif_running, settings.host, settings.port)
+            }
+        } else {
+            getString(R.string.notif_starting)
+        }
+
+        val builder = NotificationCompat.Builder(this, channelId())
+            .setSmallIcon(R.drawable.ic_stat_proxy)
+            .setContentTitle(title)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setContentIntent(openIntent)
+
+        if (quiet) {
+            return builder
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+                .build()
+        }
+
         val stopIntent = PendingIntent.getService(
             this, 1,
             Intent(this, ProxyService::class.java).setAction(ACTION_STOP),
             pendingFlags(),
         )
-
-        val title = if (running) {
-            getString(R.string.notif_running, settings.host, settings.port)
-        } else {
-            getString(R.string.notif_starting)
-        }
         val text = detail ?: if (running) {
             getString(
                 R.string.notif_traffic,
@@ -269,16 +317,9 @@ class ProxyService : Service() {
             getString(R.string.notif_channel_desc)
         }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_proxy)
-            .setContentTitle(title)
+        return builder
             .setContentText(text)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setContentIntent(openIntent)
             .addAction(0, getString(R.string.action_stop), stopIntent)
             .build()
     }
@@ -298,6 +339,9 @@ class ProxyService : Service() {
     }
 
     private fun startStatsUpdates() {
+        // In quiet mode the notification carries no traffic counters, so there
+        // is nothing to refresh.
+        if (Settings.get(this).quietNotification) return
         statsRunning = true
         val t = Thread({
             while (statsRunning) {

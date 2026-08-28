@@ -26,10 +26,17 @@ import com.flowseal.tgwsproxy.core.Logger
 import com.flowseal.tgwsproxy.core.ProxyConfig
 import com.flowseal.tgwsproxy.core.Settings
 import com.flowseal.tgwsproxy.core.Stats
+import com.flowseal.tgwsproxy.core.UpdateChecker
+import com.flowseal.tgwsproxy.core.UpdateInstaller
 import com.flowseal.tgwsproxy.databinding.ActivityMainBinding
 import com.flowseal.tgwsproxy.service.ProxyService
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        /** Nag at most once a day; the check itself is a single tiny request. */
+        private const val UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
+    }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var settings: Settings
@@ -73,6 +80,7 @@ class MainActivity : AppCompatActivity() {
         wireUp()
         requestNotificationPermission()
         maybeShowFirstRun()
+        maybeCheckForUpdate()
 
         binding.toolbar.setOnMenuItemClickListener { onMenuItem(it) }
     }
@@ -155,7 +163,22 @@ class MainActivity : AppCompatActivity() {
         section(maskingHeader, maskingContent, maskingChevron)
         section(fallbackHeader, fallbackContent, fallbackChevron)
         section(advancedHeader, advancedContent, advancedChevron)
+        section(appHeader, appContent, appChevron)
         section(logsHeader, logsContent, logsChevron)
+
+        // The channel changes with this switch, so a running service needs to
+        // re-issue its notification for the new look to take effect.
+        quietNotificationSwitch.setOnCheckedChangeListener { _, checked ->
+            settings.quietNotification = checked
+            if (ProxyService.isRunning) ProxyService.restart(this@MainActivity)
+        }
+        notificationSettingsButton.setOnClickListener { openNotificationSettings() }
+
+        autoUpdateSwitch.setOnCheckedChangeListener { _, checked ->
+            settings.autoUpdateCheck = checked
+            if (checked) settings.skippedUpdate = ""
+        }
+        checkUpdateButton.setOnClickListener { checkForUpdateNow() }
 
         tlsSplitSwitch.setOnCheckedChangeListener { _, checked ->
             tlsSplitDelayLayout.isEnabled = checked
@@ -199,11 +222,17 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
+        R.id.action_check_update -> {
+            checkForUpdateNow()
+            true
+        }
+
         R.id.action_about -> {
             AlertDialog.Builder(this)
                 .setTitle(R.string.about_title)
                 .setMessage(R.string.about_body)
                 .setPositiveButton(R.string.about_close, null)
+                .setNeutralButton(R.string.action_open_releases) { _, _ -> openReleasesPage() }
                 .show()
             true
         }
@@ -240,6 +269,9 @@ class MainActivity : AppCompatActivity() {
         forceTestDcSwitch.isChecked = settings.forceTestDc
         autostartSwitch.isChecked = settings.autostart
         verboseSwitch.isChecked = settings.verbose
+        quietNotificationSwitch.isChecked = settings.quietNotification
+        autoUpdateSwitch.isChecked = settings.autoUpdateCheck
+        versionText.text = getString(R.string.version_current, appVersion())
     }
 
     /** Persists the form. Returns an error message, or null on success. */
@@ -273,6 +305,8 @@ class MainActivity : AppCompatActivity() {
         settings.forceTestDc = forceTestDcSwitch.isChecked
         settings.autostart = autostartSwitch.isChecked
         settings.verbose = verboseSwitch.isChecked
+        settings.quietNotification = quietNotificationSwitch.isChecked
+        settings.autoUpdateCheck = autoUpdateSwitch.isChecked
         Logger.verbose = settings.verbose
 
         val validation = settings.validate()
@@ -411,11 +445,141 @@ class MainActivity : AppCompatActivity() {
                 getString(
                     R.string.first_run_body,
                     settings.host, settings.port, settings.secret,
-                )
+                ) + "\n\n" + getString(R.string.first_run_update_notice)
             )
             .setPositiveButton(R.string.first_run_ok) { _, _ -> settings.firstRunDone = true }
             .setCancelable(false)
             .show()
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    private fun appVersion(): String = runCatching {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+    }.getOrDefault("?")
+
+    /** Silent daily check; only speaks up when there is something newer. */
+    private fun maybeCheckForUpdate() {
+        if (!settings.autoUpdateCheck) return
+        val now = System.currentTimeMillis()
+        if (now - settings.lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) return
+        settings.lastUpdateCheck = now
+
+        val current = appVersion()
+        Thread({
+            val release = UpdateChecker.check(current) ?: return@Thread
+            if (UpdateChecker.normalize(release.version) == settings.skippedUpdate) return@Thread
+            handler.post { showUpdateDialog(release, current) }
+        }, "update-check").apply { isDaemon = true }.start()
+    }
+
+    /** Explicit check from the menu or the button; always reports the outcome. */
+    private fun checkForUpdateNow() {
+        val current = appVersion()
+        toast(getString(R.string.update_checking))
+        settings.lastUpdateCheck = System.currentTimeMillis()
+        Thread({
+            val release = runCatching { UpdateChecker.check(current) }.getOrNull()
+            handler.post {
+                when {
+                    release != null -> showUpdateDialog(release, current)
+                    UpdateChecker.lastCheckFailed -> toast(getString(R.string.update_check_failed))
+                    else -> toast(getString(R.string.update_none, current))
+                }
+            }
+        }, "update-check-manual").apply { isDaemon = true }.start()
+    }
+
+    private fun showUpdateDialog(release: UpdateChecker.Release, current: String) {
+        if (isFinishing || isDestroyed) return
+        val notes = release.notes.trim().take(700)
+        val message = buildString {
+            append(getString(R.string.update_installed, current))
+            if (release.sizeBytes > 0) {
+                append(" · ").append(Const.humanBytes(release.sizeBytes))
+            }
+            append("\n\n")
+            append(getString(R.string.update_signature_warning))
+            if (notes.isNotEmpty()) append("\n\n").append(notes)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.update_title, release.version))
+            .setMessage(message)
+            .setPositiveButton(R.string.action_update_now) { _, _ -> downloadUpdate(release) }
+            .setNeutralButton(R.string.action_skip_version) { _, _ ->
+                settings.skippedUpdate = UpdateChecker.normalize(release.version)
+            }
+            .setNegativeButton(R.string.action_later, null)
+            .show()
+    }
+
+    private fun downloadUpdate(release: UpdateChecker.Release) {
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.update_permission_title)
+                .setMessage(R.string.update_permission_body)
+                .setPositiveButton(R.string.action_grant) { _, _ ->
+                    UpdateInstaller.openInstallPermission(this)
+                }
+                .setNegativeButton(R.string.action_cancel, null)
+                .show()
+            return
+        }
+
+        val progress = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.update_title, release.version))
+            .setMessage(getString(R.string.update_downloading, 0))
+            .setCancelable(false)
+            .show()
+
+        Thread({
+            try {
+                val apk = UpdateInstaller.download(
+                    this, release.apkUrl, release.sizeBytes,
+                ) { percent ->
+                    handler.post {
+                        progress.setMessage(getString(R.string.update_downloading, percent))
+                    }
+                }
+                handler.post {
+                    runCatching { progress.dismiss() }
+                    if (!UpdateInstaller.install(this, apk)) {
+                        UpdateInstaller.openInstallPermission(this)
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.w("Update download failed: $e")
+                handler.post {
+                    runCatching { progress.dismiss() }
+                    toast(
+                        getString(
+                            R.string.update_download_failed,
+                            e.message ?: e.javaClass.simpleName,
+                        )
+                    )
+                }
+            }
+        }, "update-download").apply { isDaemon = true }.start()
+    }
+
+    private fun openReleasesPage() {
+        runCatching {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.RELEASES_PAGE))
+            )
+        }
+    }
+
+    private fun openNotificationSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= 26) {
+            Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$packageName"))
+        }
+        runCatching { startActivity(intent) }
     }
 
     private fun requestNotificationPermission() {
