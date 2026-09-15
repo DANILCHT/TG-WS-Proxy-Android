@@ -68,6 +68,13 @@
     <string name="help_fronting_sni">Имя, которое видит сеть вместо домена Telegram. Подойдёт любой сайт, который оператор не блокирует.</string>
     <string name="field_bypass_vpn">Не пускать через VPN</string>
     <string name="help_bypass_vpn">Пока включён VPN, прокси держит свои соединения в обычной сети, поэтому трафик Telegram идёт мимо VPN. На другие приложения не влияет. Если VPN запрещает соединения вне туннеля, приложение вернётся к работе через него и напишет об этом в лог.</string>
+    <string name="field_mobile_evasion">Усиленный обход на мобильном интернете</string>
+    <string name="help_mobile_evasion">Когда телефон на мобильном интернете, включать разрез TLS и нейтральный домен на время сессии, даже если выше они выключены. Применяется при запуске прокси.</string>
+
+    <string name="action_diagnose">Проверить соединение</string>
+    <string name="action_copy_result">Скопировать результат</string>
+    <string name="diagnostics_title">Диагностика соединения</string>
+    <string name="diagnostics_running">Проверяем серверы Telegram — может занять до полуминуты…</string>
 
     <string name="field_fake_tls">Домен Fake TLS (необязательно)</string>
     <string name="hint_fake_tls">Оборачивает соединение между Telegram и приложением в то, что похоже на TLS к указанному сайту. Касается только локального участка.</string>

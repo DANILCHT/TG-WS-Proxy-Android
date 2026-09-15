@@ -11,6 +11,32 @@ object Logger {
     const val TAG = "TgWsProxy"
     private const val MAX_LINES = 600
 
+    /**
+     * Port of proxy/utils.py::DomainCensorFilter — user domains (fronting SNI,
+     * CF workers, Fake TLS) must not end up in logs or bug reports. Telegram's
+     * own domains stay readable.
+     */
+    private val DOMAIN_RE = Regex(
+        """(?<![\w-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}(?![\w-])"""
+    )
+
+    fun censorDomains(msg: String): String = DOMAIN_RE.replace(msg) { m ->
+        val domain = m.value
+        val normalized = domain.lowercase().trimEnd('.')
+        if (normalized == "telegram.org" ||
+            normalized.endsWith(".telegram.org") ||
+            normalized.endsWith(".log")
+        ) {
+            return@replace domain
+        }
+        val parts = domain.split(".")
+        if (parts.size < 2) return@replace domain
+        parts.mapIndexed { i, part ->
+            if (i == parts.lastIndex) part
+            else part.take(part.length / 2) + "*".repeat(part.length - part.length / 2)
+        }.joinToString(".")
+    }
+
     @Volatile
     var verbose: Boolean = false
 
@@ -49,7 +75,7 @@ object Logger {
     private fun store(level: String, msg: String) {
         val ts = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
             .format(java.util.Date())
-        val line = "$ts  $level  $msg"
+        val line = "$ts  $level  ${censorDomains(msg)}"
         synchronized(lines) {
             lines.addLast(line)
             while (lines.size > MAX_LINES) lines.removeFirst()

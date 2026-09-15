@@ -113,6 +113,14 @@
                             android:text="@string/action_copy_link"
                             app:cornerRadius="14dp" />
                     </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/diagnoseButton"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/action_diagnose" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -351,6 +359,19 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="@string/help_bypass_vpn" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/mobileEvasionSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_mobile_evasion" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_mobile_evasion" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

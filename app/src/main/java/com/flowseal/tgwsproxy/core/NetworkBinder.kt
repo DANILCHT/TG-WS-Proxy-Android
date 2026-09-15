@@ -71,6 +71,38 @@ object NetworkBinder {
         return "bypassing VPN via ${transportName(caps)}"
     }
 
+    /** Active transport: "wifi", "cellular", "ethernet", "vpn" or "unknown". */
+    fun activeTransport(): String {
+        val ctx = appContext ?: return "unknown"
+        val cm = connectivity(ctx) ?: return "unknown"
+        if (Build.VERSION.SDK_INT >= 23) {
+            val net = runCatching { cm.activeNetwork }.getOrNull() ?: return "unknown"
+            val caps = cm.getNetworkCapabilities(net) ?: return "unknown"
+            return transportId(caps, vpnFirst = true)
+        }
+        @Suppress("DEPRECATION")
+        val info = runCatching { cm.activeNetworkInfo }.getOrNull() ?: return "unknown"
+        if (!info.isConnected) return "unknown"
+        @Suppress("DEPRECATION")
+        return when (info.type) {
+            ConnectivityManager.TYPE_WIFI -> "wifi"
+            ConnectivityManager.TYPE_MOBILE -> "cellular"
+            ConnectivityManager.TYPE_ETHERNET -> "ethernet"
+            ConnectivityManager.TYPE_VPN -> "vpn"
+            else -> "unknown"
+        }
+    }
+
+    private fun transportId(caps: NetworkCapabilities, vpnFirst: Boolean = false): String = when {
+        vpnFirst && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+        else -> "unknown"
+    }
+
+    fun isCellular(): Boolean = activeTransport() == "cellular"
+
     /**
      * Connects a socket from [factory], binding it to a non-VPN network when
      * one is needed. Falls back to an unbound socket if binding turns out to be

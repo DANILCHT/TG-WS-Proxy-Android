@@ -33,6 +33,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         const val KEY_FRONTING_FIRST = "fronting_first"
         const val KEY_FRONTING_SNI = "fronting_sni"
         const val KEY_BYPASS_VPN = "bypass_vpn"
+        const val KEY_MOBILE_EVASION = "mobile_evasion"
         const val KEY_QUIET_NOTIFICATION = "quiet_notification"
         const val KEY_AUTO_UPDATE_CHECK = "auto_update_check"
         const val KEY_UPDATE_SKIPPED = "update_skipped_version"
@@ -150,6 +151,10 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_BYPASS_VPN, true)
         set(v) = prefs.edit().putBoolean(KEY_BYPASS_VPN, v).apply()
 
+    var mobileEvasion: Boolean
+        get() = prefs.getBoolean(KEY_MOBILE_EVASION, true)
+        set(v) = prefs.edit().putBoolean(KEY_MOBILE_EVASION, v).apply()
+
     /**
      * Minimal foreground notification: no counters, no buttons, hidden from the
      * lock screen. A foreground service cannot run with no notification at all.
@@ -200,6 +205,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         cfg.frontingFirst = frontingFirst
         cfg.frontingSni = frontingSni
         cfg.bypassVpn = bypassVpn
+        cfg.mobileEvasion = mobileEvasion
         return cfg
     }
 

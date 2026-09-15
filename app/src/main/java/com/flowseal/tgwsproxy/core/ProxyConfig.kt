@@ -37,6 +37,12 @@ class ProxyConfig {
     /** Keep upstream sockets outside an active VPN tunnel. */
     var bypassVpn: Boolean = true
 
+    /**
+     * On mobile data, force the evasion pair (TLS split + fronting-first) for
+     * the session even when the base settings have them off.
+     */
+    var mobileEvasion: Boolean = true
+
     fun copy(): ProxyConfig {
         val c = ProxyConfig()
         c.port = port
@@ -56,7 +62,26 @@ class ProxyConfig {
         c.frontingFirst = frontingFirst
         c.frontingSni = frontingSni
         c.bypassVpn = bypassVpn
+        c.mobileEvasion = mobileEvasion
         return c
+    }
+
+    /**
+     * Applies the mobile-data profile. Pure decision logic, kept here so it is
+     * unit-testable without Android APIs. Returns true when overrides fired.
+     */
+    fun applyMobileProfile(isCellular: Boolean): Boolean {
+        if (!mobileEvasion || !isCellular) return false
+        var changed = false
+        if (!fragmentClientHello) {
+            fragmentClientHello = true
+            changed = true
+        }
+        if (!frontingFirst) {
+            frontingFirst = true
+            changed = true
+        }
+        return changed
     }
 
     companion object {

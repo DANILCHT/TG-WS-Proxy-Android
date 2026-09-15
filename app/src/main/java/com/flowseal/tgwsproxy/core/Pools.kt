@@ -18,8 +18,11 @@ class WsPool(private val executor: ExecutorService) {
 
     companion object {
         const val WS_POOL_MAX_AGE_MS = 120_000L
-        const val REFILL_BACKOFF_INITIAL_MS = 60_000L
+        // Mirrors upstream REFILL_BACKOFF_INITIAL = 1.0: a failed refill is
+        // retried almost immediately, then backs off exponentially.
+        const val REFILL_BACKOFF_INITIAL_MS = 1_000L
         const val REFILL_BACKOFF_MAX_MS = 3_600_000L
+        const val REFILL_BACKOFF_MAX_SHIFT = 12
     }
 
     private data class Key(val dc: Int, val isMedia: Boolean)
@@ -35,7 +38,7 @@ class WsPool(private val executor: ExecutorService) {
     private val refillAfter = ConcurrentHashMap<Key, Long>()
 
     @Volatile
-    var tryFrontingFirst: Boolean = false
+    var tryFrontingFirst: Boolean = true
         private set
 
     @Volatile
@@ -59,7 +62,6 @@ class WsPool(private val executor: ExecutorService) {
         isMedia: Boolean,
         targetIp: String,
         domains: List<String>,
-        allowRefill: Boolean = true,
     ): RawWebSocket? {
         val key = Key(dc, isMedia)
         val now = System.currentTimeMillis()
@@ -79,12 +81,12 @@ class WsPool(private val executor: ExecutorService) {
                     "(age=${age / 1000.0}s, left=$left)"
             )
             reportSuccess(dc, isMedia)
-            if (allowRefill) scheduleRefill(key, targetIp, domains)
+            scheduleRefill(key, targetIp, domains)
             return entry.ws
         }
 
         Stats.poolMisses.incrementAndGet()
-        if (allowRefill) scheduleRefill(key, targetIp, domains)
+        scheduleRefill(key, targetIp, domains)
         return null
     }
 
@@ -124,7 +126,7 @@ class WsPool(private val executor: ExecutorService) {
                 val failures = (refillFailures[key] ?: 0) + 1
                 refillFailures[key] = failures
                 val delay = minOf(
-                    REFILL_BACKOFF_INITIAL_MS shl minOf(failures - 1, 6),
+                    REFILL_BACKOFF_INITIAL_MS * (1L shl minOf(failures - 1, REFILL_BACKOFF_MAX_SHIFT)),
                     REFILL_BACKOFF_MAX_MS,
                 )
                 refillAfter[key] = System.currentTimeMillis() + delay
@@ -156,6 +158,11 @@ class WsPool(private val executor: ExecutorService) {
                 tryFrontingFirst = false
                 return ws
             } catch (e: java.net.SocketTimeoutException) {
+                if (tryFrontingFirst) return null
+                return connectFronted(targetIp, domain)
+            } catch (e: java.net.SocketException) {
+                // Connection reset mid-handshake: same treatment as a timeout,
+                // mirrors upstream catching ConnectionResetError next to TimeoutError.
                 if (tryFrontingFirst) return null
                 return connectFronted(targetIp, domain)
             } catch (e: WsHandshakeError) {
@@ -207,6 +214,8 @@ class WsPool(private val executor: ExecutorService) {
                 "WS pool rotated DC${key.dc}${if (key.isMedia) "m" else ""}: " +
                     "${expired.size} stale, ${synchronized(bucket) { bucket.size }} ready"
             )
+            // Upstream refills after rotation only when the bucket is short.
+            if (synchronized(bucket) { bucket.size } >= config.poolSize) continue
             val targetIp = config.dcRedirects[key.dc] ?: continue
             scheduleRefill(key, targetIp, Const.wsDomains(key.dc, key.isMedia))
         }
@@ -296,6 +305,7 @@ class CfWorkerPool(private val executor: ExecutorService) {
         }
 
         Stats.cfPoolMisses.incrementAndGet()
+        scheduleRefill(dc, fallbackDst, workerDomains)
         return null
     }
 
@@ -360,13 +370,19 @@ class CfWorkerPool(private val executor: ExecutorService) {
         return domains
     }
 
-    /**
-     * Mirrors the Python version, which currently ignores the failure
-     * (TODO upstream: verify the status code sent after the daily limit).
-     */
-    @Suppress("UNUSED_PARAMETER")
+    /** Disables a Worker domain until the next UTC day after its HTTP 429 limit. */
     fun reportFailure(workerDomain: String, exc: Exception) {
-        // no-op
+        if (exc !is WsHandshakeError || exc.statusCode != 429) return
+
+        val now = System.currentTimeMillis()
+        if ((exhaustedUntil[workerDomain] ?: 0L) > now) return
+
+        val until = now + (86_400_000L - now % 86_400_000L)
+        exhaustedUntil[workerDomain] = until
+        Logger.w(
+            "CF worker $workerDomain reached its request limit, disabled for " +
+                "${(until - now) / 1000}s"
+        )
     }
 
     fun warmup() {

@@ -22,6 +22,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.material.snackbar.Snackbar
 import com.flowseal.tgwsproxy.R
 import com.flowseal.tgwsproxy.core.Const
+import com.flowseal.tgwsproxy.core.Diagnostics
 import com.flowseal.tgwsproxy.core.Logger
 import com.flowseal.tgwsproxy.core.ProxyConfig
 import com.flowseal.tgwsproxy.core.Settings
@@ -135,6 +136,7 @@ class MainActivity : AppCompatActivity() {
             copyToClipboard(tgLink())
             toast(getString(R.string.msg_copied))
         }
+        diagnoseButton.setOnClickListener { runDiagnostics() }
 
         regenerateSecretButton.setOnClickListener {
             secretInput.setText(settings.regenerateSecret())
@@ -255,6 +257,7 @@ class MainActivity : AppCompatActivity() {
         frontingFirstSwitch.isChecked = settings.frontingFirst
         frontingSniInput.setText(settings.frontingSni)
         bypassVpnSwitch.isChecked = settings.bypassVpn
+        mobileEvasionSwitch.isChecked = settings.mobileEvasion
         cfproxySwitch.isChecked = settings.cfproxy
         cfUserSwitch.isChecked = settings.cfUserDomainEnabled
         cfUserDomainInput.setText(settings.cfUserDomain.joinToString(", "))
@@ -295,6 +298,7 @@ class MainActivity : AppCompatActivity() {
         settings.frontingFirst = frontingFirstSwitch.isChecked
         settings.frontingSni = frontingSniInput.text.toString().trim()
         settings.bypassVpn = bypassVpnSwitch.isChecked
+        settings.mobileEvasion = mobileEvasionSwitch.isChecked
         settings.cfproxy = cfproxySwitch.isChecked
         settings.cfUserDomainEnabled = cfUserSwitch.isChecked
         settings.cfUserDomain = splitInput(cfUserDomainInput.text.toString())
@@ -569,6 +573,33 @@ class MainActivity : AppCompatActivity() {
                 Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.RELEASES_PAGE))
             )
         }
+    }
+
+    // ------------------------------------------------------------- diagnostics
+
+    private fun runDiagnostics() {
+        val progress = AlertDialog.Builder(this)
+            .setTitle(R.string.diagnostics_title)
+            .setMessage(R.string.diagnostics_running)
+            .setCancelable(false)
+            .show()
+        Thread({
+            val cfg = settings.toProxyConfig()
+            val report = Diagnostics.run(cfg)
+            handler.post {
+                runCatching { progress.dismiss() }
+                if (isFinishing || isDestroyed) return@post
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.diagnostics_title)
+                    .setMessage(report.text())
+                    .setPositiveButton(R.string.about_close, null)
+                    .setNeutralButton(R.string.action_copy_result) { _, _ ->
+                        copyToClipboard(report.text())
+                        toast(getString(R.string.msg_copied))
+                    }
+                    .show()
+            }
+        }, "diagnostics").apply { isDaemon = true }.start()
     }
 
     private fun openNotificationSettings() {

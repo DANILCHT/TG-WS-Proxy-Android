@@ -30,6 +30,7 @@ class ProxyEngine(val config: ProxyConfig) {
         private const val IP_FAIL_COOLDOWN_MS = 3_600_000L
         private const val DC_FAIL_COOLDOWN_MS = 60_000L
         private const val WS_FAIL_TIMEOUT_MS = 2_000
+        private const val WS_BLACKLIST_COOLDOWN_MS = 600_000L
         private const val LISTENER_RESTART_DELAY_MS = 1_000L
         private const val STATS_INTERVAL_MS = 60_000L
         private const val POOL_SWEEP_INTERVAL_MS = 5_000L
@@ -57,10 +58,9 @@ class ProxyEngine(val config: ProxyConfig) {
     private val fallback = Fallback(config, cfWorkerPool)
     private val domainRefresher = CfDomainRefresher(config)
 
-    // Collections.newSetFromMap instead of ConcurrentHashMap.newKeySet: the
-    // latter's KeySetView methods are only desugared from API 24.
-    private val wsBlacklist: MutableSet<String> =
-        java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+    // Redirects can be transient. Keep a short per-DC cooldown rather than
+    // forcing every affected DC through fallback until the proxy is restarted.
+    private val wsBlacklistUntil = ConcurrentHashMap<String, Long>()
     private val dcFailUntil = ConcurrentHashMap<String, Long>()
     private val ipFailUntil = ConcurrentHashMap<String, Long>()
 
@@ -93,7 +93,7 @@ class ProxyEngine(val config: ProxyConfig) {
 
         wsPool.reset()
         cfWorkerPool.reset()
-        wsBlacklist.clear()
+        wsBlacklistUntil.clear()
         dcFailUntil.clear()
         ipFailUntil.clear()
 
@@ -102,6 +102,12 @@ class ProxyEngine(val config: ProxyConfig) {
         // Must happen before warmup below, which opens sockets immediately.
         Tls.configure(config)
         NetworkBinder.configure(config.bypassVpn)
+        if (config.applyMobileProfile(NetworkBinder.isCellular())) {
+            // Pools read frontingFirst at configure() time, so re-apply.
+            wsPool.configure(config)
+            cfWorkerPool.configure(config)
+            Logger.i("Mobile data active: TLS split + fronting-first forced for this session")
+        }
 
         val userCfDomains = config.cfproxyUserDomains
         if (userCfDomains.isNotEmpty()) {
@@ -212,6 +218,7 @@ class ProxyEngine(val config: ProxyConfig) {
                 }
         )
         if (config.frontingFirst) Logger.i("  Fronting SNI:  ${config.frontingSni} (first attempt)")
+        Logger.i("  Network:       ${NetworkBinder.activeTransport()}")
         Logger.i("  VPN bypass:    ${NetworkBinder.describe()}")
         Logger.i("=".repeat(60))
         Logger.i("  Connect:")
@@ -272,8 +279,11 @@ class ProxyEngine(val config: ProxyConfig) {
             val now = System.currentTimeMillis()
             if (now - lastStats >= STATS_INTERVAL_MS) {
                 lastStats = now
-                val bl = if (wsBlacklist.isEmpty()) "none" else {
-                    wsBlacklist.sorted().joinToString(", ") { "DC$it" }
+                val activeBlacklist = wsBlacklistUntil.entries
+                    .filter { it.value > now }
+                    .sortedBy { it.key }
+                val bl = if (activeBlacklist.isEmpty()) "none" else {
+                    activeBlacklist.joinToString(", ") { "DC${it.key}" }
                 }
                 Logger.i("stats: ${Stats.summary()} | ws_bl: $bl")
             }
@@ -457,17 +467,8 @@ class ProxyEngine(val config: ProxyConfig) {
             val target = config.dcRedirects[dc]
             val isAnyCfFallback = config.fallbackCfproxy || config.cfproxyWorkerDomains.isNotEmpty()
 
-            val ipCooldownActive = target != null &&
-                now < (ipFailUntil[target] ?: 0L) && isAnyCfFallback
-
-            if (target == null || dcKey in wsBlacklist || ipCooldownActive) {
-                when {
-                    target == null -> Logger.i("[$label] DC$dc not in config -> fallback")
-                    dcKey in wsBlacklist ->
-                        Logger.i("[$label] DC$dc$mediaTag WS blacklisted -> fallback")
-                    else ->
-                        Logger.i("[$label] DC$dc$mediaTag WS connect to $target was timed out -> fallback")
-                }
+            if (target == null) {
+                Logger.i("[$label] DC$dc not in config -> fallback")
                 val splitter = runCatching { MsgSplitter(relayInit, protoInt) }.getOrNull()
                 val ok = fallback.doFallback(
                     clientStream, relayInit, label, dc, isTestDc, isMedia, mediaTag, ctx, splitter,
@@ -476,17 +477,51 @@ class ProxyEngine(val config: ProxyConfig) {
                 return
             }
 
-            val wsTimeout = if (now < (dcFailUntil[dcKey] ?: 0L)) WS_FAIL_TIMEOUT_MS else 5_000
             val domains = Const.wsDomains(dc, isMedia)
-
             var ws: RawWebSocket? = null
+            var blacklistUntil = wsBlacklistUntil[dcKey] ?: 0L
+            if (blacklistUntil != 0L && blacklistUntil <= now) {
+                wsBlacklistUntil.remove(dcKey, blacklistUntil)
+                blacklistUntil = 0L
+            }
+
+            if (blacklistUntil > now || (now < (ipFailUntil[target] ?: 0L) && isAnyCfFallback)) {
+                if (blacklistUntil > now) {
+                    Logger.i(
+                        "[$label] DC$dc$mediaTag WS blacklisted for " +
+                            "${(blacklistUntil - now) / 1000}s -> fallback"
+                    )
+                } else {
+                    // Upstream: a timeout can be accidental, so consult the pool
+                    // before giving up on the direct route.
+                    if (!isTestDc) ws = wsPool.get(dc, isMedia, target, domains)
+                    if (ws != null) {
+                        Logger.i(
+                            "[$label] DC$dc$mediaTag WS connect to $target was timed out, " +
+                                "but pool hit -> using WS"
+                        )
+                    } else {
+                        Logger.i("[$label] DC$dc$mediaTag WS connect to $target was timed out -> fallback")
+                    }
+                }
+                if (ws == null) {
+                    val splitter = runCatching { MsgSplitter(relayInit, protoInt) }.getOrNull()
+                    val ok = fallback.doFallback(
+                        clientStream, relayInit, label, dc, isTestDc, isMedia, mediaTag, ctx, splitter,
+                    )
+                    if (!ok) Logger.w("[$label] DC$dc$mediaTag no fallback available")
+                    return
+                }
+            }
+
+            val wsTimeout = if (now < (dcFailUntil[dcKey] ?: 0L)) WS_FAIL_TIMEOUT_MS else 5_000
+
             var wsFailedRedirect = false
             var wsTimedOut = false
             var allRedirects = true
 
-            val allowPoolRefill = now >= (ipFailUntil[target] ?: 0L)
-            if (!isTestDc) {
-                ws = wsPool.get(dc, isMedia, target, domains, allowRefill = allowPoolRefill)
+            if (ws == null && !isTestDc) {
+                ws = wsPool.get(dc, isMedia, target, domains)
                 if (ws != null) {
                     Logger.i("[$label] DC$dc$mediaTag -> pool hit via $target")
                 }
@@ -536,14 +571,17 @@ class ProxyEngine(val config: ProxyConfig) {
                     )
                 }
                 if (wsFailedRedirect && allRedirects) {
-                    wsBlacklist.add(dcKey)
-                    Logger.w("[$label] DC$dc$mediaTag blacklisted for WS (all 302)")
+                    wsBlacklistUntil[dcKey] = now + WS_BLACKLIST_COOLDOWN_MS
+                    Logger.w(
+                        "[$label] DC$dc$mediaTag blacklisted for WS for " +
+                            "${WS_BLACKLIST_COOLDOWN_MS / 1000}s (all 302)"
+                    )
                 } else if (wsFailedRedirect) {
                     dcFailUntil[dcKey] = now + DC_FAIL_COOLDOWN_MS
                 } else {
                     dcFailUntil[dcKey] = now + DC_FAIL_COOLDOWN_MS
                     Logger.i(
-                        "[$label] DC$dc$mediaTag WS cooldown for ${DC_FAIL_COOLDOWN_MS / 1000}s"
+                        "[$label] DC$dc$mediaTag WS failed for ${DC_FAIL_COOLDOWN_MS / 1000}s"
                     )
                 }
 
@@ -555,7 +593,8 @@ class ProxyEngine(val config: ProxyConfig) {
                 return
             }
 
-            dcFailUntil.remove(dcKey)
+            // Upstream clears only the IP cooldown on success; the DC cooldown
+            // is left to expire on its own timer.
             ipFailUntil.remove(target)
             wsPool.reportSuccess(dc, isMedia)
             Stats.connectionsWs.incrementAndGet()

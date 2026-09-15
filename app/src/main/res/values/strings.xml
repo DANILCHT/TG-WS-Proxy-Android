@@ -69,6 +69,13 @@
     <string name="help_fronting_sni">The name shown to the network instead of Telegram\'s. Must be a site your operator does not block.</string>
     <string name="field_bypass_vpn">Keep out of the VPN tunnel</string>
     <string name="help_bypass_vpn">While a VPN is up, the proxy keeps its own connections on the normal network, so Telegram traffic does not go through the VPN. Other apps are unaffected. If the VPN forbids connections outside the tunnel, the app falls back to using it and writes that to the log.</string>
+    <string name="field_mobile_evasion">Stronger evasion on mobile data</string>
+    <string name="help_mobile_evasion">When the phone is on mobile data, force the TLS split and the neutral domain for the session even if they are off above. Applies when the proxy starts.</string>
+
+    <string name="action_diagnose">Check connection</string>
+    <string name="action_copy_result">Copy result</string>
+    <string name="diagnostics_title">Connection diagnostics</string>
+    <string name="diagnostics_running">Probing Telegram servers — can take up to half a minute…</string>
 
     <string name="field_fake_tls">Fake TLS domain (optional)</string>
     <string name="hint_fake_tls">Wraps the connection between Telegram and this app in something that looks like TLS to the given site. Applies to the local link only.</string>
