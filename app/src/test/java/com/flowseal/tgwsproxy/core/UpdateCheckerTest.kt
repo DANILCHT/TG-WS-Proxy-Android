@@ -89,6 +89,32 @@ class UpdateCheckerTest {
     }
 
     @Test
+    fun digestIsTakenFromTheApkAsset() {
+        val sha = "ab".repeat(32)
+        val json = releaseJson(
+            assets = """
+                {"name":"notes.txt","size":1,"digest":"sha256:${"00".repeat(32)}",
+                 "browser_download_url":"https://github.com/o/r/releases/download/v1.1.0/notes.txt"},
+                {"name":"app-release.apk","size":5,"digest":"sha256:${sha.uppercase()}",
+                 "browser_download_url":"https://github.com/o/r/releases/download/v1.1.0/app-release.apk"}
+            """.trimIndent()
+        )
+        val r = requireNotNull(UpdateChecker.parse(json))
+        assertEquals(sha, r.sha256)
+        assertEquals(5L, r.sizeBytes)
+    }
+
+    @Test
+    fun missingOrMalformedDigestIsNull() {
+        assertNull(requireNotNull(UpdateChecker.parse(releaseJson())).sha256)
+        val json = releaseJson(
+            assets = """{"name":"a.apk","size":1,"digest":"md5:zz",
+                "browser_download_url":"https://github.com/o/r/a.apk"}"""
+        )
+        assertNull(requireNotNull(UpdateChecker.parse(json)).sha256)
+    }
+
+    @Test
     fun releaseWithoutApkIsRejected() {
         val json = releaseJson(
             assets = """{"name":"notes.txt","size":10,

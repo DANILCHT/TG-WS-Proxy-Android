@@ -2,10 +2,8 @@ package com.flowseal.tgwsproxy.net
 
 import com.flowseal.tgwsproxy.core.Crypto
 import com.flowseal.tgwsproxy.core.Logger
-import java.io.EOFException
 import java.io.OutputStream
-import java.net.SocketTimeoutException
-import javax.net.ssl.SSLSocket
+import java.net.Socket
 
 class WsHandshakeError(
     val statusCode: Int,
@@ -23,7 +21,7 @@ class WsHandshakeError(
  * what the MTProto bridge needs: masked binary frames, ping/pong, close.
  */
 class RawWebSocket private constructor(
-    private val socket: SSLSocket,
+    private val socket: Socket,
     private val stream: SocketStream,
 ) {
 
@@ -45,8 +43,11 @@ class RawWebSocket private constructor(
         )
 
         /**
-         * Opens a WSS connection to [host] (an IP or hostname) using [domain]
-         * for the HTTP Host header and [sni] (defaults to [domain]) for TLS.
+         * Opens a WebSocket to [host] (an IP or hostname) using [domain] for
+         * the HTTP Host header and [sni] (defaults to [domain]) for TLS.
+         *
+         * [secure] = false is upstream's `--no-secure`: plain ws:// on port 80.
+         * [verify] defaults to a full check, or chain-only when fronting.
          */
         @Throws(Exception::class)
         fun connect(
@@ -56,20 +57,31 @@ class RawWebSocket private constructor(
             path: String = "/apiws",
             sni: String? = null,
             bufferSize: Int = 256 * 1024,
+            secure: Boolean = true,
+            port: Int = if (secure) 443 else 80,
+            verify: Tls.Verify? = null,
+            connectTimeoutMs: Int = minOf(timeoutMs, 10_000),
         ): RawWebSocket {
             val serverName = sni ?: domain
-            val connectTimeout = minOf(timeoutMs, 10_000)
 
-            val ssl = Tls.connect(
-                host = host,
-                port = 443,
-                sni = serverName,
-                connectTimeoutMs = connectTimeout,
-                readTimeoutMs = timeoutMs,
-                bufferSize = bufferSize,
-            )
+            val sock: Socket = if (secure) {
+                Tls.connect(
+                    host = host,
+                    port = port,
+                    sni = serverName,
+                    connectTimeoutMs = connectTimeoutMs,
+                    readTimeoutMs = timeoutMs,
+                    bufferSize = bufferSize,
+                    verify = verify ?: if (serverName == domain) Tls.Verify.FULL else Tls.Verify.CHAIN,
+                    hostnameToVerify = serverName,
+                )
+            } else {
+                Tls.connectPlain(host, port, connectTimeoutMs, bufferSize).also {
+                    it.soTimeout = timeoutMs
+                }
+            }
 
-            val stream = SocketStream(ssl, 32 * 1024)
+            val stream = SocketStream(sock, 32 * 1024)
             try {
                 val wsKey = Crypto.base64(Crypto.randomBytes(16))
 
@@ -105,7 +117,7 @@ class RawWebSocket private constructor(
                 val statusCode = if (parts.size >= 2) parts[1].toIntOrNull() ?: 0 else 0
 
                 if (statusCode == 101) {
-                    return RawWebSocket(ssl, stream)
+                    return RawWebSocket(sock, stream)
                 }
 
                 val headers = HashMap<String, String>()
@@ -294,6 +306,12 @@ class RawWebSocket private constructor(
  */
 internal object WsFraming {
 
+    // One generator per thread: the shared SecureRandom is synchronized and
+    // every outgoing frame needs a fresh mask.
+    private val maskRng = object : ThreadLocal<java.security.SecureRandom>() {
+        override fun initialValue() = java.security.SecureRandom()
+    }
+
     fun xorMaskInto(
         data: ByteArray, off: Int, len: Int,
         mask: ByteArray, out: ByteArray, outOff: Int,
@@ -309,7 +327,7 @@ internal object WsFraming {
         off: Int,
         len: Int,
         mask: Boolean,
-        maskKey: ByteArray = Crypto.randomBytes(4),
+        maskKey: ByteArray = maskRng.get()!!.let { r -> ByteArray(4).also { r.nextBytes(it) } },
     ): ByteArray {
         val fb = (0x80 or opcode).toByte()
         if (!mask) {

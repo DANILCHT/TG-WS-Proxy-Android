@@ -90,6 +90,21 @@ class WsPool(private val executor: ExecutorService) {
         return null
     }
 
+    /**
+     * Takes an extra, already-open connection (a loser of the route race) when
+     * the bucket has room. Returns false when the caller should close it.
+     */
+    fun offer(dc: Int, isMedia: Boolean, ws: RawWebSocket): Boolean {
+        if (stopped || ws.isBroken) return false
+        val bucket = bucketFor(Key(dc, isMedia))
+        synchronized(bucket) {
+            if (bucket.size >= config.poolSize) return false
+            bucket.addLast(Entry(ws, System.currentTimeMillis()))
+        }
+        Logger.d("WS pool adopted spare connection DC$dc${if (isMedia) "m" else ""}")
+        return true
+    }
+
     fun reportSuccess(dc: Int, isMedia: Boolean) {
         val key = Key(dc, isMedia)
         refillFailures.remove(key)
@@ -153,7 +168,7 @@ class WsPool(private val executor: ExecutorService) {
             try {
                 val ws = RawWebSocket.connect(
                     host = targetIp, domain = domain, timeoutMs = 8_000,
-                    bufferSize = config.bufferSize,
+                    bufferSize = config.bufferSize, connectTimeoutMs = 5_000,
                 )
                 tryFrontingFirst = false
                 return ws
@@ -180,7 +195,7 @@ class WsPool(private val executor: ExecutorService) {
             RawWebSocket.connect(
                 host = targetIp, domain = domain, timeoutMs = 7_000,
                 sni = config.frontingSni.ifBlank { ProxyConfig.DEFAULT_FRONTING_SNI },
-                bufferSize = config.bufferSize,
+                bufferSize = config.bufferSize, connectTimeoutMs = 5_000,
             )
         } catch (e: Exception) {
             return null
@@ -231,188 +246,34 @@ class WsPool(private val executor: ExecutorService) {
         Logger.i("WS pool warmup started for ${config.dcRedirects.size} DC(s)")
     }
 
-    fun reset() {
-        stopped = true
+    /**
+     * Drops idle sockets and refill backoff but keeps the pool running; used
+     * after a network change, when every open socket belongs to the old network.
+     */
+    fun flush() {
         for ((_, bucket) in idle) {
             synchronized(bucket) {
                 while (true) {
                     val e = bucket.pollFirst() ?: break
-                    closeQuiet(e.ws)
+                    e.ws.abort()
                 }
             }
         }
-        idle.clear()
-        refilling.clear()
         refillFailures.clear()
         refillAfter.clear()
-        tryFrontingFirst = false
+    }
+
+    fun reset() {
+        stopped = true
+        flush()
+        idle.clear()
+        refilling.clear()
+        // Upstream starts with try_fronting_first = True.
+        tryFrontingFirst = true
     }
 
     private fun closeQuiet(ws: RawWebSocket) {
         runCatching { executor.execute { runCatching { ws.close() } } }
             .onFailure { runCatching { ws.abort() } }
     }
-}
-
-/**
- * Port of proxy/pool.py::_CfWorkerPool — one pre-opened Cloudflare Worker
- * connection per DC, used by the CF worker fallback path.
- */
-class CfWorkerPool(private val executor: ExecutorService) {
-
-    companion object {
-        const val WS_POOL_MAX_AGE_MS = 100_000L
-        const val PER_DC_LIMIT = 1
-    }
-
-    private class Entry(val ws: RawWebSocket, val createdAt: Long, val workerDomain: String)
-
-    private val idle = ConcurrentHashMap<Int, ArrayDeque<Entry>>()
-    private val refilling: MutableSet<Int> =
-        java.util.Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
-    private val exhaustedUntil = ConcurrentHashMap<String, Long>()
-
-    @Volatile
-    private var config: ProxyConfig = ProxyConfig()
-
-    @Volatile
-    private var stopped = false
-
-    fun configure(cfg: ProxyConfig) {
-        config = cfg
-    }
-
-    class Pooled(val ws: RawWebSocket, val workerDomain: String)
-
-    fun get(dc: Int, fallbackDst: String, workerDomains: List<String>): Pooled? {
-        val now = System.currentTimeMillis()
-        val bucket = idle.getOrPut(dc) { ArrayDeque() }
-
-        while (true) {
-            val e = synchronized(bucket) { bucket.pollFirst() } ?: break
-            val age = now - e.createdAt
-            if (age > WS_POOL_MAX_AGE_MS || e.ws.isBroken) {
-                runCatching { executor.execute { runCatching { e.ws.close() } } }
-                continue
-            }
-            Stats.cfPoolHits.incrementAndGet()
-            Logger.d(
-                "CF worker pool hit DC$dc via ${e.workerDomain} " +
-                    "(age=${age / 1000.0}s, left=${synchronized(bucket) { bucket.size }})"
-            )
-            scheduleRefill(dc, fallbackDst, workerDomains)
-            return Pooled(e.ws, e.workerDomain)
-        }
-
-        Stats.cfPoolMisses.incrementAndGet()
-        scheduleRefill(dc, fallbackDst, workerDomains)
-        return null
-    }
-
-    private fun scheduleRefill(dc: Int, fallbackDst: String, workerDomains: List<String>) {
-        if (stopped) return
-        if (!refilling.add(dc)) return
-        runCatching {
-            executor.execute { refill(dc, fallbackDst, workerDomains.toList()) }
-        }.onFailure { refilling.remove(dc) }
-    }
-
-    private fun refill(dc: Int, fallbackDst: String, workerDomains: List<String>) {
-        try {
-            if (stopped) return
-            val bucket = idle.getOrPut(dc) { ArrayDeque() }
-            val targetSize = minOf(config.poolSize, PER_DC_LIMIT)
-            val needed = targetSize - synchronized(bucket) { bucket.size }
-            if (needed <= 0) return
-
-            for (i in 0 until needed) {
-                if (stopped) break
-                val connected = connectOne(workerDomains, fallbackDst, dc) ?: break
-                synchronized(bucket) {
-                    bucket.addLast(
-                        Entry(connected.ws, System.currentTimeMillis(), connected.workerDomain)
-                    )
-                }
-            }
-            Logger.d("CF worker pool refilled DC$dc: ${synchronized(bucket) { bucket.size }} ready")
-        } finally {
-            refilling.remove(dc)
-        }
-    }
-
-    private fun connectOne(workerDomains: List<String>, fallbackDst: String, dc: Int): Pooled? {
-        val path = "/apiws?dst=${urlEncode(fallbackDst)}&dc=$dc"
-        for (workerDomain in availableDomains(workerDomains)) {
-            try {
-                val ws = RawWebSocket.connect(
-                    host = workerDomain, domain = workerDomain, timeoutMs = 8_000,
-                    path = path, bufferSize = config.bufferSize,
-                )
-                return Pooled(ws, workerDomain)
-            } catch (e: Exception) {
-                reportFailure(workerDomain, e)
-            }
-        }
-        return null
-    }
-
-    fun availableDomains(workerDomains: List<String>): List<String> {
-        val now = System.currentTimeMillis()
-        val domains = ArrayList<String>()
-        for (domain in workerDomains) {
-            if (domains.contains(domain)) continue
-            val until = exhaustedUntil[domain] ?: 0L
-            if (until > now) continue
-            if (until != 0L) exhaustedUntil.remove(domain)
-            domains.add(domain)
-        }
-        domains.shuffle()
-        return domains
-    }
-
-    /** Disables a Worker domain until the next UTC day after its HTTP 429 limit. */
-    fun reportFailure(workerDomain: String, exc: Exception) {
-        if (exc !is WsHandshakeError || exc.statusCode != 429) return
-
-        val now = System.currentTimeMillis()
-        if ((exhaustedUntil[workerDomain] ?: 0L) > now) return
-
-        val until = now + (86_400_000L - now % 86_400_000L)
-        exhaustedUntil[workerDomain] = until
-        Logger.w(
-            "CF worker $workerDomain reached its request limit, disabled for " +
-                "${(until - now) / 1000}s"
-        )
-    }
-
-    fun warmup() {
-        stopped = false
-        if (config.cfproxyWorkerDomains.isEmpty()) return
-        val cfFallbacks = Const.DC_DEFAULT_IPS.filterKeys { it !in config.dcRedirects }
-        if (cfFallbacks.isEmpty()) return
-
-        val workerDomains = config.cfproxyWorkerDomains.toList()
-        for ((dc, fallbackDst) in cfFallbacks) {
-            scheduleRefill(dc, fallbackDst, workerDomains)
-        }
-        Logger.i("CF worker pool warmup started for ${cfFallbacks.size} DC(s)")
-    }
-
-    fun reset() {
-        stopped = true
-        for ((_, bucket) in idle) {
-            synchronized(bucket) {
-                while (true) {
-                    val e = bucket.pollFirst() ?: break
-                    runCatching { e.ws.abort() }
-                }
-            }
-        }
-        idle.clear()
-        refilling.clear()
-        exhaustedUntil.clear()
-    }
-
-    private fun urlEncode(s: String): String =
-        java.net.URLEncoder.encode(s, "UTF-8")
 }

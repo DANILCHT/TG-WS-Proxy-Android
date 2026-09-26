@@ -144,6 +144,9 @@ object Bridge {
 
     private const val CHUNK = 65536
 
+    /** Outcome of one relayed session, used to spot routes that connect but carry nothing. */
+    class Session(val upBytes: Long, val downBytes: Long, val durationMs: Long, val reason: String)
+
     fun bridgeWsReencrypt(
         client: DataStream,
         ws: RawWebSocket,
@@ -152,7 +155,7 @@ object Bridge {
         dc: Int?,
         isMedia: Boolean,
         splitter: MsgSplitter?,
-    ) {
+    ): Session {
         val dcTag = if (dc != null) "DC$dc${if (isMedia) "m" else ""}" else "DC?"
 
         val upBytes = AtomicLong()
@@ -232,6 +235,10 @@ object Bridge {
                     String.format(java.util.Locale.US, "in %.1fs", elapsed)
             )
         }
+        return Session(
+            upBytes.get(), downBytes.get(),
+            (System.nanoTime() - startTime) / 1_000_000, reason.get(),
+        )
     }
 
     fun bridgeTcpReencrypt(
@@ -239,7 +246,10 @@ object Bridge {
         remote: DataStream,
         label: String,
         ctx: CryptoCtx,
-    ) {
+    ): Session {
+        val startTime = System.nanoTime()
+        val upBytes = AtomicLong()
+        val downBytes = AtomicLong()
         val downThread = Thread({
             val buf = ByteArray(CHUNK)
             try {
@@ -247,6 +257,7 @@ object Bridge {
                     val n = remote.read(buf, 0, CHUNK)
                     if (n <= 0) break
                     Stats.bytesDown.addAndGet(n.toLong())
+                    downBytes.addAndGet(n.toLong())
                     val plain = ctx.tgDec.update(buf, 0, n)
                     client.write(ctx.cltEnc.update(plain))
                     client.flush()
@@ -266,6 +277,7 @@ object Bridge {
                 val n = client.read(buf, 0, CHUNK)
                 if (n <= 0) break
                 Stats.bytesUp.addAndGet(n.toLong())
+                upBytes.addAndGet(n.toLong())
                 val plain = ctx.cltDec.update(buf, 0, n)
                 remote.write(ctx.tgEnc.update(plain))
                 remote.flush()
@@ -277,5 +289,9 @@ object Bridge {
             runCatching { client.close() }
             downThread.join(2_000)
         }
+        return Session(
+            upBytes.get(), downBytes.get(),
+            (System.nanoTime() - startTime) / 1_000_000, "tcp",
+        )
     }
 }

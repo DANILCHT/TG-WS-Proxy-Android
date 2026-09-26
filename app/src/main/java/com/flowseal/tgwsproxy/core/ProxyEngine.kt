@@ -1,19 +1,17 @@
 package com.flowseal.tgwsproxy.core
 
 import com.flowseal.tgwsproxy.net.DataStream
+import com.flowseal.tgwsproxy.net.Dns
 import com.flowseal.tgwsproxy.net.FakeTls
 import com.flowseal.tgwsproxy.net.FakeTlsStream
-import com.flowseal.tgwsproxy.net.RawWebSocket
 import com.flowseal.tgwsproxy.net.SocketStream
 import com.flowseal.tgwsproxy.net.Tls
-import com.flowseal.tgwsproxy.net.WsHandshakeError
 import java.io.EOFException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -27,10 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ProxyEngine(val config: ProxyConfig) {
 
     companion object {
-        private const val IP_FAIL_COOLDOWN_MS = 3_600_000L
-        private const val DC_FAIL_COOLDOWN_MS = 60_000L
-        private const val WS_FAIL_TIMEOUT_MS = 2_000
-        private const val WS_BLACKLIST_COOLDOWN_MS = 600_000L
         private const val LISTENER_RESTART_DELAY_MS = 1_000L
         private const val STATS_INTERVAL_MS = 60_000L
         private const val POOL_SWEEP_INTERVAL_MS = 5_000L
@@ -51,18 +45,21 @@ class ProxyEngine(val config: ProxyConfig) {
         4, 512, 60L, TimeUnit.SECONDS, SynchronousQueue(),
         ThreadPoolExecutor.CallerRunsPolicy(),
     )
-    private val poolExecutor = Executors.newFixedThreadPool(6)
+    private val poolExecutor = Executors.newFixedThreadPool(6, daemonThreads("tg-ws-pool"))
+
+    // Route attempts race each other, so they need their own threads; bounded
+    // so a burst of Telegram connections cannot spawn threads without limit.
+    private val connectExecutor = ThreadPoolExecutor(
+        0, 256, 30L, TimeUnit.SECONDS, SynchronousQueue(), daemonThreads("tg-ws-connect"),
+    )
 
     private val wsPool = WsPool(poolExecutor)
-    private val cfWorkerPool = CfWorkerPool(poolExecutor)
-    private val fallback = Fallback(config, cfWorkerPool)
+    private val relayPool = RelayPool(poolExecutor)
+    private val router = Router(config, wsPool, relayPool, connectExecutor)
     private val domainRefresher = CfDomainRefresher(config)
 
-    // Redirects can be transient. Keep a short per-DC cooldown rather than
-    // forcing every affected DC through fallback until the proxy is restarted.
-    private val wsBlacklistUntil = ConcurrentHashMap<String, Long>()
-    private val dcFailUntil = ConcurrentHashMap<String, Long>()
-    private val ipFailUntil = ConcurrentHashMap<String, Long>()
+    /** Settings as saved; [config] gets the per-network overrides on top. */
+    private val baseConfig: ProxyConfig = config.copy()
 
     private val stopping = AtomicBoolean(false)
 
@@ -92,22 +89,13 @@ class ProxyEngine(val config: ProxyConfig) {
         Stats.reset()
 
         wsPool.reset()
-        cfWorkerPool.reset()
-        wsBlacklistUntil.clear()
-        dcFailUntil.clear()
-        ipFailUntil.clear()
+        relayPool.reset()
+        router.reset()
+        Dns.clear()
 
-        wsPool.configure(config)
-        cfWorkerPool.configure(config)
-        // Must happen before warmup below, which opens sockets immediately.
-        Tls.configure(config)
         NetworkBinder.configure(config.bypassVpn)
-        if (config.applyMobileProfile(NetworkBinder.isCellular())) {
-            // Pools read frontingFirst at configure() time, so re-apply.
-            wsPool.configure(config)
-            cfWorkerPool.configure(config)
-            Logger.i("Mobile data active: TLS split + fronting-first forced for this session")
-        }
+        // Must happen before warmup below, which opens sockets immediately.
+        applyNetworkProfile()
 
         val userCfDomains = config.cfproxyUserDomains
         if (userCfDomains.isNotEmpty()) {
@@ -131,22 +119,58 @@ class ProxyEngine(val config: ProxyConfig) {
         houseKeeper = hk
         hk.start()
 
+        warmup()
+        NetworkBinder.watch { onNetworkChanged() }
+    }
+
+    private fun warmup() {
         wsPool.warmup()
-        cfWorkerPool.warmup()
+        relayPool.warmup(config.relayEndpoints(), allDcs = config.relayFirst)
+    }
+
+    /**
+     * Re-derives the per-network overrides from [baseConfig]: on mobile data
+     * the TLS split and fronting-first are forced when the user allowed that.
+     */
+    private fun applyNetworkProfile() {
+        config.fragmentClientHello = baseConfig.fragmentClientHello
+        config.frontingFirst = baseConfig.frontingFirst
+        val forced = config.applyMobileProfile(NetworkBinder.isCellular())
+        Tls.configure(config)
+        wsPool.configure(config)
+        relayPool.configure(config)
+        if (forced) Logger.i("Mobile data active: TLS split + fronting-first forced")
+    }
+
+    /**
+     * Every pooled socket, cooldown and learned route belongs to the previous
+     * network; keeping them means a long stall on the first new connections.
+     */
+    private fun onNetworkChanged() {
+        if (stopping.get()) return
+        Dns.clear()
+        router.reset()
+        wsPool.flush()
+        relayPool.flush()
+        applyNetworkProfile()
+        Logger.i("Network: ${NetworkBinder.activeTransport()}, VPN bypass: ${NetworkBinder.describe()}")
+        warmup()
     }
 
     fun stop() {
         if (!stopping.compareAndSet(false, true)) return
         Logger.i("Stopping proxy")
+        NetworkBinder.unwatch()
         domainRefresher.stop()
         runCatching { serverSocket?.close() }
         serverSocket = null
         acceptThread?.interrupt()
         houseKeeper?.interrupt()
         wsPool.reset()
-        cfWorkerPool.reset()
+        relayPool.reset()
         workers.shutdownNow()
         poolExecutor.shutdownNow()
+        connectExecutor.shutdownNow()
         Logger.i("Proxy stopped. Final stats: ${Stats.summary()}")
     }
 
@@ -209,6 +233,17 @@ class ProxyEngine(val config: ProxyConfig) {
         if (config.cfproxyWorkerDomains.isNotEmpty()) {
             Logger.i("  CF worker:     enabled (${config.cfproxyWorkerDomains.joinToString(", ")})")
         }
+        if (config.disableSecure) {
+            Logger.i("  No secure:     enabled (port 80 for CF proxy/worker)")
+        }
+        val relays = RelayEndpoint.parseList(config.relays)
+        if (relays.isNotEmpty()) {
+            Logger.i(
+                "  Relays:        ${relays.joinToString(", ")}" +
+                    if (config.relayFirst) " (first)" else ""
+            )
+        }
+        Logger.i("  TLS verify:    ${if (config.verifyTls) "on" else "off"}")
         Logger.i(
             "  TLS split:     " +
                 if (config.fragmentClientHello) {
@@ -279,13 +314,10 @@ class ProxyEngine(val config: ProxyConfig) {
             val now = System.currentTimeMillis()
             if (now - lastStats >= STATS_INTERVAL_MS) {
                 lastStats = now
-                val activeBlacklist = wsBlacklistUntil.entries
-                    .filter { it.value > now }
-                    .sortedBy { it.key }
-                val bl = if (activeBlacklist.isEmpty()) "none" else {
-                    activeBlacklist.joinToString(", ") { "DC${it.key}" }
-                }
-                Logger.i("stats: ${Stats.summary()} | ws_bl: $bl")
+                Logger.i(
+                    "stats: ${Stats.summary()} | ws_bl: ${router.blacklistSummary(now)} " +
+                        "| routes: ${router.routeSummary(now)}"
+                )
             }
         }
     }
@@ -460,154 +492,7 @@ class ProxyEngine(val config: ProxyConfig) {
             val relayInit = Obfuscated.generateRelayInit(protoTag, dcIdx)
             val ctx = Obfuscated.buildCryptoCtx(result.decPrekeyAndIv, secret, relayInit)
 
-            val dcKey = "$dc${if (isTestDc) "t" else ""}${if (isMedia) "m" else ""}"
-            val mediaTag = if (isMedia) " media" else ""
-            val now = System.currentTimeMillis()
-            val wsPath = if (isTestDc) Const.WS_PATH_TEST else Const.WS_PATH
-            val target = config.dcRedirects[dc]
-            val isAnyCfFallback = config.fallbackCfproxy || config.cfproxyWorkerDomains.isNotEmpty()
-
-            if (target == null) {
-                Logger.i("[$label] DC$dc not in config -> fallback")
-                val splitter = runCatching { MsgSplitter(relayInit, protoInt) }.getOrNull()
-                val ok = fallback.doFallback(
-                    clientStream, relayInit, label, dc, isTestDc, isMedia, mediaTag, ctx, splitter,
-                )
-                if (!ok) Logger.w("[$label] DC$dc$mediaTag no fallback available")
-                return
-            }
-
-            val domains = Const.wsDomains(dc, isMedia)
-            var ws: RawWebSocket? = null
-            var blacklistUntil = wsBlacklistUntil[dcKey] ?: 0L
-            if (blacklistUntil != 0L && blacklistUntil <= now) {
-                wsBlacklistUntil.remove(dcKey, blacklistUntil)
-                blacklistUntil = 0L
-            }
-
-            if (blacklistUntil > now || (now < (ipFailUntil[target] ?: 0L) && isAnyCfFallback)) {
-                if (blacklistUntil > now) {
-                    Logger.i(
-                        "[$label] DC$dc$mediaTag WS blacklisted for " +
-                            "${(blacklistUntil - now) / 1000}s -> fallback"
-                    )
-                } else {
-                    // Upstream: a timeout can be accidental, so consult the pool
-                    // before giving up on the direct route.
-                    if (!isTestDc) ws = wsPool.get(dc, isMedia, target, domains)
-                    if (ws != null) {
-                        Logger.i(
-                            "[$label] DC$dc$mediaTag WS connect to $target was timed out, " +
-                                "but pool hit -> using WS"
-                        )
-                    } else {
-                        Logger.i("[$label] DC$dc$mediaTag WS connect to $target was timed out -> fallback")
-                    }
-                }
-                if (ws == null) {
-                    val splitter = runCatching { MsgSplitter(relayInit, protoInt) }.getOrNull()
-                    val ok = fallback.doFallback(
-                        clientStream, relayInit, label, dc, isTestDc, isMedia, mediaTag, ctx, splitter,
-                    )
-                    if (!ok) Logger.w("[$label] DC$dc$mediaTag no fallback available")
-                    return
-                }
-            }
-
-            val wsTimeout = if (now < (dcFailUntil[dcKey] ?: 0L)) WS_FAIL_TIMEOUT_MS else 5_000
-
-            var wsFailedRedirect = false
-            var wsTimedOut = false
-            var allRedirects = true
-
-            if (ws == null && !isTestDc) {
-                ws = wsPool.get(dc, isMedia, target, domains)
-                if (ws != null) {
-                    Logger.i("[$label] DC$dc$mediaTag -> pool hit via $target")
-                }
-            }
-
-            if (ws == null) {
-                for (domain in domains) {
-                    Logger.i("[$label] DC$dc$mediaTag -> wss://$domain$wsPath via $target")
-                    try {
-                        ws = RawWebSocket.connect(
-                            host = target, domain = domain, timeoutMs = wsTimeout,
-                            path = wsPath, bufferSize = config.bufferSize,
-                        )
-                        allRedirects = false
-                        break
-                    } catch (e: WsHandshakeError) {
-                        Stats.wsErrors.incrementAndGet()
-                        if (e.isRedirect) {
-                            wsFailedRedirect = true
-                            Logger.w(
-                                "[$label] DC$dc$mediaTag got ${e.statusCode} from $domain " +
-                                    "-> ${e.location ?: "?"}"
-                            )
-                            continue
-                        }
-                        allRedirects = false
-                        Logger.w("[$label] DC$dc$mediaTag WS handshake: ${e.statusLine}")
-                    } catch (e: SocketTimeoutException) {
-                        Stats.wsErrors.incrementAndGet()
-                        wsTimedOut = true
-                        Logger.w("[$label] DC$dc$mediaTag WS connect timed out via $domain")
-                        break
-                    } catch (e: Exception) {
-                        Stats.wsErrors.incrementAndGet()
-                        allRedirects = false
-                        Logger.w("[$label] DC$dc$mediaTag WS connect failed: $e")
-                    }
-                }
-            }
-
-            if (ws == null) {
-                if (wsTimedOut) {
-                    ipFailUntil[target] = now + IP_FAIL_COOLDOWN_MS
-                    Logger.i(
-                        "[$label] DC$dc$mediaTag WS connect to $target timed out, " +
-                            "cooldown for ${IP_FAIL_COOLDOWN_MS / 1000}s"
-                    )
-                }
-                if (wsFailedRedirect && allRedirects) {
-                    wsBlacklistUntil[dcKey] = now + WS_BLACKLIST_COOLDOWN_MS
-                    Logger.w(
-                        "[$label] DC$dc$mediaTag blacklisted for WS for " +
-                            "${WS_BLACKLIST_COOLDOWN_MS / 1000}s (all 302)"
-                    )
-                } else if (wsFailedRedirect) {
-                    dcFailUntil[dcKey] = now + DC_FAIL_COOLDOWN_MS
-                } else {
-                    dcFailUntil[dcKey] = now + DC_FAIL_COOLDOWN_MS
-                    Logger.i(
-                        "[$label] DC$dc$mediaTag WS failed for ${DC_FAIL_COOLDOWN_MS / 1000}s"
-                    )
-                }
-
-                val splitterFb = runCatching { MsgSplitter(relayInit, protoInt) }.getOrNull()
-                val ok = fallback.doFallback(
-                    clientStream, relayInit, label, dc, isTestDc, isMedia, mediaTag, ctx, splitterFb,
-                )
-                if (ok) Logger.i("[$label] DC$dc$mediaTag fallback closed")
-                return
-            }
-
-            // Upstream clears only the IP cooldown on success; the DC cooldown
-            // is left to expire on its own timer.
-            ipFailUntil.remove(target)
-            wsPool.reportSuccess(dc, isMedia)
-            Stats.connectionsWs.incrementAndGet()
-
-            val splitter = runCatching {
-                MsgSplitter(relayInit, protoInt).also {
-                    Logger.d("[$label] MsgSplitter activated for proto=0x%08X".format(protoInt))
-                }
-            }.getOrNull()
-
-            ws.setReadTimeout(0)
-            ws.send(relayInit)
-            Bridge.bridgeWsReencrypt(clientStream, ws, label, ctx, dc, isMedia, splitter)
+            router.serve(clientStream, label, dc, isTestDc, isMedia, relayInit, ctx, protoInt)
         } catch (e: SocketTimeoutException) {
             Logger.w("[$label] timeout during handshake")
         } catch (e: EOFException) {
@@ -619,6 +504,10 @@ class ProxyEngine(val config: ProxyConfig) {
             runCatching { stream?.close() }
             runCatching { socket.close() }
         }
+    }
+
+    private fun daemonThreads(name: String) = java.util.concurrent.ThreadFactory { r ->
+        Thread(r, name).apply { isDaemon = true }
     }
 
     /** Mirrors the Python "read until the client gives up" path on bad secrets. */

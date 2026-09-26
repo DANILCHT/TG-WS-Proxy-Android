@@ -126,11 +126,11 @@ object NetworkBinder {
                 runCatching { socket.close() }
                 // A timeout means the peer is unreachable, not that binding is
                 // broken; retrying unbound would only double the wait.
-                if (e is SocketTimeoutException) throw e
+                if (e is SocketTimeoutException || e is java.net.UnknownHostException) throw e
                 Logger.d("Bound connect to $host:$port failed ($e), retrying unbound")
                 val plain = factory()
                 try {
-                    plain.connect(InetSocketAddress(host, port), timeoutMs)
+                    plain.connect(InetSocketAddress(resolve(null, host), port), timeoutMs)
                 } catch (retry: Exception) {
                     runCatching { plain.close() }
                     throw e
@@ -146,9 +146,10 @@ object NetworkBinder {
             }
         }
 
+        val addr = resolve(null, host)
         val socket = factory()
         try {
-            socket.connect(InetSocketAddress(host, port), timeoutMs)
+            socket.connect(InetSocketAddress(addr, port), timeoutMs)
         } catch (e: Exception) {
             runCatching { socket.close() }
             throw e
@@ -169,11 +170,87 @@ object NetworkBinder {
         return runCatching { net.openConnection(url) }.getOrElse { url.openConnection() }
     }
 
-    private fun resolve(net: Network, host: String): InetAddress {
+    /** Cached lookup with a DoH fallback, on [net] when given. */
+    private fun resolve(net: Network?, host: String): InetAddress {
         if (ProxyConfig.isIpv4(host)) return InetAddress.getByName(host)
-        val addrs = net.getAllByName(host)
-        if (addrs.isNullOrEmpty()) throw java.net.UnknownHostException(host)
-        return addrs[0]
+        val addrs = com.flowseal.tgwsproxy.net.Dns.resolve(host) { h ->
+            net?.getAllByName(h) ?: InetAddress.getAllByName(h)
+        }
+        return addrs.first()
+    }
+
+    // ---------------------------------------------------------- network watch
+
+    @Volatile
+    private var callback: ConnectivityManager.NetworkCallback? = null
+
+    @Volatile
+    private var lastSignature: String? = null
+
+    private val watchHandler by lazy {
+        android.os.Handler(android.os.HandlerThread("net-watch").apply { start() }.looper)
+    }
+
+    /**
+     * Calls [onChange] (debounced, off the main thread) whenever the default
+     * network changes, e.g. Wi-Fi <-> mobile data or a VPN going up/down.
+     * Sockets and cooldowns tied to the old network are useless after that.
+     */
+    @SuppressLint("MissingPermission")
+    fun watch(onChange: () -> Unit) {
+        unwatch()
+        val ctx = appContext ?: return
+        val cm = connectivity(ctx) ?: return
+        lastSignature = signature(cm)
+        val fire = Runnable {
+            val sig = signature(cm)
+            if (sig == lastSignature) return@Runnable
+            Logger.i("Network changed: ${lastSignature ?: "none"} -> ${sig ?: "none"}")
+            lastSignature = sig
+            cached = null
+            cachedAt = 0L
+            bindingUsable = true
+            runCatching { onChange() }.onFailure { Logger.w("Network change handler failed: $it") }
+        }
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            private fun poke() {
+                watchHandler.removeCallbacks(fire)
+                watchHandler.postDelayed(fire, 1_500)
+            }
+
+            override fun onAvailable(network: Network) = poke()
+            override fun onLost(network: Network) = poke()
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = poke()
+        }
+        val request = android.net.NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+        runCatching { cm.registerNetworkCallback(request, cb) }
+            .onSuccess { callback = cb }
+            .onFailure { Logger.d("Network watch unavailable: $it") }
+    }
+
+    fun unwatch() {
+        val cb = callback ?: return
+        callback = null
+        val ctx = appContext ?: return
+        runCatching { connectivity(ctx)?.unregisterNetworkCallback(cb) }
+    }
+
+    /** Identity of the current default route: network handle + transport. */
+    @SuppressLint("MissingPermission")
+    private fun signature(cm: ConnectivityManager): String? {
+        if (Build.VERSION.SDK_INT >= 23) {
+            val net = runCatching { cm.activeNetwork }.getOrNull() ?: return null
+            val caps = cm.getNetworkCapabilities(net)
+            val vpn = if (vpnActive(cm)) "+vpn" else ""
+            return "$net/${caps?.let { transportId(it, vpnFirst = true) } ?: "?"}$vpn"
+        }
+        @Suppress("DEPRECATION")
+        val info = runCatching { cm.activeNetworkInfo }.getOrNull() ?: return null
+        @Suppress("DEPRECATION")
+        return if (info.isConnected) "${info.type}/${info.subtype}" else null
     }
 
     private fun pick(): Network? {

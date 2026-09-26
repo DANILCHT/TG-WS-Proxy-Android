@@ -86,7 +86,7 @@
     <string name="help_cf_user_domain">Your own domains behind Cloudflare instead of the public ones. Needs setup on the Cloudflare side.</string>
     <string name="field_cf_user_domain_hint">Domains, comma separated</string>
     <string name="field_cf_worker">Cloudflare Worker fallback</string>
-    <string name="help_cf_worker">A route through your own Cloudflare Worker. Tried before the CF proxy.</string>
+    <string name="help_cf_worker">A route through your own Cloudflare Worker (docs/CfWorker.md in the desktop project). Races with the other routes; a self-hosted relay can go in “Whitelist bypass”.</string>
     <string name="field_cf_worker_hint">Worker domains, comma separated</string>
 
     <string name="field_pool_size">WS pool size per DC</string>
@@ -111,8 +111,8 @@
 
     <string name="field_quiet_notification">Quiet notification</string>
     <string name="help_quiet_notification">Removes counters and the Stop button, hides the notification from the lock screen and collapses it at the bottom of the shade. Android does not allow removing it completely — a background service without a notification gets killed by the system. To hide it entirely, turn the notification off in system settings; the proxy keeps working, but the system may stop it sooner.</string>
-    <string name="field_auto_update">Check for updates on GitHub</string>
-    <string name="help_auto_update">On startup the app asks GitHub whether a newer version exists, no more than once a day. Nothing is installed without your confirmation: you will see the version, the changes and an Update button. Turn this off to check manually only.</string>
+    <string name="field_auto_update">Check for updates automatically</string>
+    <string name="help_auto_update">Asks GitHub for a new version every few hours in the background, even when the app is closed. If GitHub is blocked, the check goes through DNS-over-HTTPS and known GitHub addresses.</string>
 
     <string name="version_current">Installed version: %1$s</string>
     <string name="update_title">Version %1$s available</string>
@@ -125,7 +125,7 @@
     <string name="update_permission_title">Permission required</string>
     <string name="update_permission_body">To install the update, allow this app to install unknown apps. Android will open the setting; enable it and press Update again.</string>
     <string name="update_signature_warning">Install the update over the existing app only if it is signed with the same key. Otherwise Android will refuse and you will have to uninstall the app first — settings will be lost.</string>
-    <string name="first_run_update_notice">Update checking on GitHub is enabled: the app will tell you when a new version is out. Nothing installs without your confirmation, and you can turn this off in “Notifications and updates”.</string>
+    <string name="first_run_update_notice">Automatic updates are on: new versions are checked, verified and installed in the background. You can change this in “Notifications and updates”.</string>
 
     <string name="msg_saved">Settings saved</string>
     <string name="msg_saved_restart">Settings saved, proxy restarted</string>
@@ -145,4 +145,26 @@
     <string name="first_run_title">Welcome</string>
     <string name="first_run_body">The proxy listens on %1$s:%2$d with secret:\n\n%3$s\n\nStart it, then tap “Open in Telegram” to add the proxy automatically.</string>
     <string name="first_run_ok">Got it</string>
+
+    <string name="route_relay">Relay</string>
+    <string name="section_relay">Whitelist bypass (relay)</string>
+    <string name="section_relay_sub">For mobile internet that only lets \"allowed\" sites through</string>
+    <string name="help_relay_intro">When an operator switches to whitelist mode, only servers on its allowed list can be reached; Telegram and Cloudflare are cut off and no setting on the phone alone gets past that. The way through is your own small relay on a server whose address is on the list (usually hosting inside the country). The relay forwards Telegram\'s already-encrypted traffic and sees nothing inside it.</string>
+    <string name="field_relays">Relay addresses, one per line</string>
+    <string name="help_relays">Examples:\nrelay.example.ru\nws://203.0.113.7:8080\nwss://relay.example.ru?ip=203.0.113.7&amp;sni=vk.com&amp;key=SECRET\nip — connect to this address, sni — the name the network sees, key — the relay password, verify=0 — accept a self-signed certificate.</string>
+    <string name="field_relay_first">Relay first</string>
+    <string name="help_relay_first">Send Telegram through the relay right away and keep a ready connection for every data center. Turn on under whitelists or when the relay is simply the fastest route. Otherwise the relay joins the race with the other routes and wins only when it answers first.</string>
+    <string name="action_relay_guide">How to set up a relay</string>
+    <string name="field_no_secure">CF over port 80 without TLS</string>
+    <string name="help_no_secure">Connect to the Cloudflare proxy and Workers over plain ws:// on port 80 (upstream \"no secure\" mode). Helps where TLS to Cloudflare is filtered but plain HTTP is not. Telegram traffic stays encrypted.</string>
+    <string name="field_verify_tls">Verify TLS certificates</string>
+    <string name="help_verify_tls">Check the certificates of Telegram, Cloudflare and relays against the system store, as the desktop version does since 1.10.4. Turn off only on old devices where connections fail with certificate errors in the log.</string>
+    <string name="field_auto_install">Install updates automatically</string>
+    <string name="help_auto_install">A found update is downloaded, checked (SHA-256 from GitHub, package name and signing key) and installed without a dialog on Android 12+; older Android versions show one confirmation. The proxy restarts by itself afterwards.</string>
+    <string name="notif_channel_updates">Updates</string>
+    <string name="update_notif_available">Tap to see what\'s new and install.</string>
+    <string name="update_notif_confirm">Tap to confirm the installation.</string>
+    <string name="update_notif_failed_title">Update %1$s failed</string>
+    <string name="update_installing">Installing…</string>
+    <string name="stat_route_ms">%1$s · %2$d ms</string>
 </resources>

@@ -19,6 +19,7 @@ import com.flowseal.tgwsproxy.core.NetworkBinder
 import com.flowseal.tgwsproxy.core.ProxyEngine
 import com.flowseal.tgwsproxy.core.Settings
 import com.flowseal.tgwsproxy.core.Stats
+import com.flowseal.tgwsproxy.core.UpdateManager
 import com.flowseal.tgwsproxy.ui.MainActivity
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -49,6 +50,8 @@ class ProxyService : Service() {
         private const val CHANNEL_ID_QUIET = "proxy_status_quiet"
         private const val NOTIFICATION_ID = 1001
         private const val STATS_UPDATE_INTERVAL_MS = 5_000L
+        private const val UPDATE_POLL_MS = 30 * 60 * 1000L
+        private const val UPDATE_FIRST_DELAY_MS = 2 * 60 * 1000L
 
         @Volatile
         private var engineRef: ProxyEngine? = null
@@ -88,6 +91,7 @@ class ProxyService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var statsThread: Thread? = null
+    private var updateThread: Thread? = null
 
     @Volatile
     private var statsRunning = false
@@ -103,6 +107,8 @@ class ProxyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                // Only an explicit stop clears it; a killed process comes back.
+                Settings.get(this).wasRunning = false
                 stopProxy()
                 stopSelf()
                 return START_NOT_STICKY
@@ -165,8 +171,10 @@ class ProxyService : Service() {
 
             engine = e
             engineRef = e
+            settings.wasRunning = true
             acquireLocks()
             startStatsUpdates()
+            startUpdatePolling()
             updateNotification(true, null)
             broadcastState(true, null)
         } finally {
@@ -178,6 +186,8 @@ class ProxyService : Service() {
         statsRunning = false
         statsThread?.interrupt()
         statsThread = null
+        updateThread?.interrupt()
+        updateThread = null
         engine?.stop()
         engine = null
         engineRef = null
@@ -356,6 +366,32 @@ class ProxyService : Service() {
         }, "notif-stats")
         t.isDaemon = true
         statsThread = t
+        t.start()
+    }
+
+    /**
+     * While the proxy runs the process is alive anyway, so it doubles as the
+     * update scheduler (JobScheduler may defer jobs for a long time on some
+     * ROMs). The real rate limit is in [UpdateManager.runScheduled].
+     */
+    private fun startUpdatePolling() {
+        UpdateJobService.schedule(this)
+        val ctx = applicationContext
+        val t = Thread({
+            var delay = UPDATE_FIRST_DELAY_MS
+            while (true) {
+                try {
+                    Thread.sleep(delay)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                delay = UPDATE_POLL_MS
+                runCatching { UpdateManager.runScheduled(ctx) }
+                    .onFailure { Logger.d("Update poll failed: $it") }
+            }
+        }, "update-poll")
+        t.isDaemon = true
+        updateThread = t
         t.start()
     }
 

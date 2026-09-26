@@ -29,14 +29,16 @@ import com.flowseal.tgwsproxy.core.Settings
 import com.flowseal.tgwsproxy.core.Stats
 import com.flowseal.tgwsproxy.core.UpdateChecker
 import com.flowseal.tgwsproxy.core.UpdateInstaller
+import com.flowseal.tgwsproxy.core.UpdateManager
 import com.flowseal.tgwsproxy.databinding.ActivityMainBinding
 import com.flowseal.tgwsproxy.service.ProxyService
+import com.flowseal.tgwsproxy.service.UpdateJobService
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        /** Nag at most once a day; the check itself is a single tiny request. */
-        private const val UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
+        const val RELAY_GUIDE_URL =
+            "https://github.com/DANILCHT/TG-WS-Proxy-Android/blob/main/relay/README.md"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -81,9 +83,20 @@ class MainActivity : AppCompatActivity() {
         wireUp()
         requestNotificationPermission()
         maybeShowFirstRun()
-        maybeCheckForUpdate()
+        UpdateJobService.schedule(this)
+        if (intent?.getBooleanExtra(UpdateManager.EXTRA_SHOW_UPDATE, false) == true) {
+            checkForUpdateNow()
+        } else {
+            maybeCheckForUpdate()
+        }
 
         binding.toolbar.setOnMenuItemClickListener { onMenuItem(it) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(UpdateManager.EXTRA_SHOW_UPDATE, false)) checkForUpdateNow()
     }
 
     override fun onStart() {
@@ -161,6 +174,7 @@ class MainActivity : AppCompatActivity() {
         // Collapsible sections: everything starts folded so the first screen is
         // just the status card and the section list.
         section(evasionHeader, evasionContent, evasionChevron)
+        section(relayHeader, relayContent, relayChevron)
         section(connectionHeader, connectionContent, connectionChevron)
         section(maskingHeader, maskingContent, maskingChevron)
         section(fallbackHeader, fallbackContent, fallbackChevron)
@@ -179,7 +193,13 @@ class MainActivity : AppCompatActivity() {
         autoUpdateSwitch.setOnCheckedChangeListener { _, checked ->
             settings.autoUpdateCheck = checked
             if (checked) settings.skippedUpdate = ""
+            autoInstallSwitch.isEnabled = checked
+            UpdateJobService.schedule(this@MainActivity)
         }
+        autoInstallSwitch.setOnCheckedChangeListener { _, checked ->
+            settings.autoInstallUpdates = checked
+        }
+        relayGuideButton.setOnClickListener { openUrl(RELAY_GUIDE_URL) }
         checkUpdateButton.setOnClickListener { checkForUpdateNow() }
 
         tlsSplitSwitch.setOnCheckedChangeListener { _, checked ->
@@ -249,6 +269,10 @@ class MainActivity : AppCompatActivity() {
         portInput.setText(settings.port.toString())
         secretInput.setText(settings.secret)
         dcIpInput.setText(settings.dcIp.joinToString(", "))
+        relaysInput.setText(settings.relays.joinToString("\n"))
+        relayFirstSwitch.isChecked = settings.relayFirst
+        noSecureSwitch.isChecked = settings.noSecure
+        verifyTlsSwitch.isChecked = settings.verifyTls
         fakeTlsInput.setText(settings.fakeTlsDomain)
         tlsSplitSwitch.isChecked = settings.tlsSplit
         tlsSplitDelayInput.setText(settings.tlsSplitDelayMs.toString())
@@ -274,6 +298,8 @@ class MainActivity : AppCompatActivity() {
         verboseSwitch.isChecked = settings.verbose
         quietNotificationSwitch.isChecked = settings.quietNotification
         autoUpdateSwitch.isChecked = settings.autoUpdateCheck
+        autoInstallSwitch.isChecked = settings.autoInstallUpdates
+        autoInstallSwitch.isEnabled = settings.autoUpdateCheck
         versionText.text = getString(R.string.version_current, appVersion())
     }
 
@@ -292,6 +318,11 @@ class MainActivity : AppCompatActivity() {
         settings.port = port
         settings.secret = secretInput.text.toString().trim().lowercase()
         settings.dcIp = splitInput(dcIpInput.text.toString())
+        settings.relays = relaysInput.text.toString().split('\n', ',', ' ', ';')
+            .map { it.trim() }.filter { it.isNotEmpty() }
+        settings.relayFirst = relayFirstSwitch.isChecked
+        settings.noSecure = noSecureSwitch.isChecked
+        settings.verifyTls = verifyTlsSwitch.isChecked
         settings.fakeTlsDomain = fakeTlsInput.text.toString().trim()
         settings.tlsSplit = tlsSplitSwitch.isChecked
         settings.tlsSplitDelayMs = splitDelay
@@ -311,6 +342,7 @@ class MainActivity : AppCompatActivity() {
         settings.verbose = verboseSwitch.isChecked
         settings.quietNotification = quietNotificationSwitch.isChecked
         settings.autoUpdateCheck = autoUpdateSwitch.isChecked
+        settings.autoInstallUpdates = autoInstallSwitch.isChecked
         Logger.verbose = settings.verbose
 
         val validation = settings.validate()
@@ -361,18 +393,22 @@ class MainActivity : AppCompatActivity() {
         binding.statUp.text = Const.humanBytes(Stats.bytesUp.get())
         binding.statDown.text = Const.humanBytes(Stats.bytesDown.get())
         binding.statActive.text = Stats.connectionsActive.get().toString()
-        binding.statRoute.text = dominantRoute()
+        val route = dominantRoute()
+        val ms = Stats.connectMsAvg
+        binding.statRoute.text = if (ms > 0) getString(R.string.stat_route_ms, route, ms.toInt()) else route
     }
 
     /** Which upstream route carried most connections so far. */
     private fun dominantRoute(): String {
         val ws = Stats.connectionsWs.get()
         val cf = Stats.connectionsCfproxy.get()
+        val relay = Stats.connectionsRelay.get()
         val tcp = Stats.connectionsTcpFallback.get()
-        val max = maxOf(ws, cf, tcp)
+        val max = maxOf(maxOf(ws, cf), maxOf(relay, tcp))
         if (max == 0L) return getString(R.string.placeholder_dash)
         val leaders = listOfNotNull(
             if (ws == max) R.string.route_ws else null,
+            if (relay == max) R.string.route_relay else null,
             if (cf == max) R.string.route_cf else null,
             if (tcp == max) R.string.route_tcp else null,
         )
@@ -458,17 +494,23 @@ class MainActivity : AppCompatActivity() {
 
     // ---------------------------------------------------------------- updates
 
-    private fun appVersion(): String = runCatching {
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
-    }.getOrDefault("?")
+    private fun appVersion(): String = UpdateManager.appVersion(this)
 
-    /** Silent daily check; only speaks up when there is something newer. */
+    /**
+     * Opening the app counts as a chance to check (the periodic job may be
+     * deferred for hours). With auto-install on this runs silently in the
+     * background; otherwise a newer version is offered in a dialog.
+     */
     private fun maybeCheckForUpdate() {
         if (!settings.autoUpdateCheck) return
-        val now = System.currentTimeMillis()
-        if (now - settings.lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) return
-        settings.lastUpdateCheck = now
+        if (System.currentTimeMillis() - settings.lastUpdateCheck < UpdateManager.CHECK_INTERVAL_MS) return
 
+        if (settings.autoInstallUpdates) {
+            val ctx = applicationContext
+            Thread({ UpdateManager.runScheduled(ctx) }, "update-check").apply { isDaemon = true }.start()
+            return
+        }
+        settings.lastUpdateCheck = System.currentTimeMillis()
         val current = appVersion()
         Thread({
             val release = UpdateChecker.check(current) ?: return@Thread
@@ -519,7 +561,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun downloadUpdate(release: UpdateChecker.Release) {
-        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+        if (!UpdateInstaller.canInstall(this)) {
             AlertDialog.Builder(this)
                 .setTitle(R.string.update_permission_title)
                 .setMessage(R.string.update_permission_body)
@@ -537,23 +579,22 @@ class MainActivity : AppCompatActivity() {
             .setCancelable(false)
             .show()
 
+        val ctx = applicationContext
         Thread({
             try {
-                val apk = UpdateInstaller.download(
-                    this, release.apkUrl, release.sizeBytes,
-                ) { percent ->
+                UpdateManager.installRelease(ctx, release) { percent ->
                     handler.post {
-                        progress.setMessage(getString(R.string.update_downloading, percent))
+                        progress.setMessage(
+                            if (percent >= 100) getString(R.string.update_installing)
+                            else getString(R.string.update_downloading, percent)
+                        )
                     }
                 }
-                handler.post {
-                    runCatching { progress.dismiss() }
-                    if (!UpdateInstaller.install(this, apk)) {
-                        UpdateInstaller.openInstallPermission(this)
-                    }
-                }
+                // The session result (a confirmation screen or a restart) comes
+                // through UpdateReceiver.
+                handler.postDelayed({ runCatching { progress.dismiss() } }, 1_500)
             } catch (e: Exception) {
-                Logger.w("Update download failed: $e")
+                Logger.w("Update failed: $e")
                 handler.post {
                     runCatching { progress.dismiss() }
                     toast(
@@ -565,6 +606,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }, "update-download").apply { isDaemon = true }.start()
+    }
+
+    private fun openUrl(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
 
     private fun openReleasesPage() {

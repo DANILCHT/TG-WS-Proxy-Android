@@ -85,7 +85,7 @@
     <string name="help_cf_user_domain">Ваши собственные домены за Cloudflare вместо публичных. Требуют настройки на стороне Cloudflare.</string>
     <string name="field_cf_user_domain_hint">Домены через запятую</string>
     <string name="field_cf_worker">Резерв через Cloudflare Worker</string>
-    <string name="help_cf_worker">Канал через ваш собственный Cloudflare Worker. Пробуется раньше CF-прокси.</string>
+    <string name="help_cf_worker">Канал через ваш собственный Cloudflare Worker (docs/CfWorker.md в десктопном проекте). Участвует в гонке маршрутов; свой relay можно указать в разделе «Обход белых списков».</string>
     <string name="field_cf_worker_hint">Домены Worker через запятую</string>
 
     <string name="field_pool_size">Пул WebSocket-сессий на DC</string>
@@ -110,8 +110,8 @@
 
     <string name="field_quiet_notification">Тихое уведомление</string>
     <string name="help_quiet_notification">Убирает счётчики и кнопку «Стоп», скрывает уведомление с экрана блокировки и сворачивает его в самый низ шторки. Совсем убрать его Android не позволяет: фоновый сервис без уведомления система выключает. Чтобы спрятать полностью, отключите уведомления в системных настройках — прокси продолжит работать, но система может останавливать его раньше.</string>
-    <string name="field_auto_update">Проверять обновления на GitHub</string>
-    <string name="help_auto_update">При запуске приложение спрашивает у GitHub, есть ли новая версия, не чаще раза в сутки. Ничего не устанавливается без вашего подтверждения: вы увидите версию, список изменений и кнопку «Обновить». Выключите, если хотите проверять только вручную.</string>
+    <string name="field_auto_update">Проверять обновления автоматически</string>
+    <string name="help_auto_update">Раз в несколько часов в фоне спрашивает у GitHub, есть ли новая версия, даже когда приложение закрыто. Если GitHub заблокирован, проверка идёт через DNS-over-HTTPS и известные адреса GitHub.</string>
 
     <string name="version_current">Установленная версия: %1$s</string>
     <string name="update_title">Доступна версия %1$s</string>
@@ -124,7 +124,7 @@
     <string name="update_permission_title">Нужно разрешение</string>
     <string name="update_permission_body">Чтобы установить обновление, разрешите приложению устанавливать неизвестные приложения. Android откроет нужный экран — включите переключатель и нажмите «Обновить» снова.</string>
     <string name="update_signature_warning">Обновление встанет поверх только если подписано тем же ключом. Иначе Android откажет, и приложение придётся удалить перед установкой — настройки будут потеряны.</string>
-    <string name="first_run_update_notice">Проверка обновлений на GitHub включена: приложение сообщит, когда выйдет новая версия. Без вашего подтверждения ничего не установится, отключить можно в разделе «Уведомления и обновления».</string>
+    <string name="first_run_update_notice">Автообновление включено: новые версии проверяются, сверяются и устанавливаются в фоне. Изменить можно в разделе «Уведомления и обновления».</string>
 
     <string name="msg_saved">Настройки сохранены</string>
     <string name="msg_saved_restart">Настройки сохранены, прокси перезапущен</string>
@@ -144,4 +144,26 @@
     <string name="first_run_title">Добро пожаловать</string>
     <string name="first_run_body">Прокси слушает %1$s:%2$d, secret:\n\n%3$s\n\nЗапустите его и нажмите «Открыть в Telegram», чтобы добавить прокси автоматически.</string>
     <string name="first_run_ok">Понятно</string>
+
+    <string name="route_relay">Relay</string>
+    <string name="section_relay">Обход белых списков (relay)</string>
+    <string name="section_relay_sub">Для мобильного интернета, где открыты только «разрешённые» сайты</string>
+    <string name="help_relay_intro">Когда оператор включает режим белых списков, доступны только серверы из разрешённого списка: Telegram и Cloudflare отрезаны, и никакая настройка на самом телефоне это не обойдёт. Выход — свой маленький relay на сервере, чей адрес в этот список входит (обычно хостинг внутри страны). Relay пересылает уже зашифрованный трафик Telegram и не видит его содержимого.</string>
+    <string name="field_relays">Адреса relay, по одному в строке</string>
+    <string name="help_relays">Примеры:\nrelay.example.ru\nws://203.0.113.7:8080\nwss://relay.example.ru?ip=203.0.113.7&amp;sni=vk.com&amp;key=ПАРОЛЬ\nip — подключаться к этому адресу, sni — имя, которое видит сеть, key — пароль relay, verify=0 — принять самоподписанный сертификат.</string>
+    <string name="field_relay_first">Relay в приоритете</string>
+    <string name="help_relay_first">Сразу направлять Telegram через relay и держать готовое соединение для каждого датацентра. Включайте при белых списках или если relay просто самый быстрый путь. Иначе relay участвует в гонке маршрутов наравне с остальными и выигрывает, только если ответит первым.</string>
+    <string name="action_relay_guide">Как поднять relay</string>
+    <string name="field_no_secure">CF через порт 80 без TLS</string>
+    <string name="help_no_secure">Подключаться к Cloudflare-прокси и Worker по обычному ws:// на порт 80 (режим «no secure» из десктопной версии). Помогает, когда TLS к Cloudflare фильтруется, а простой HTTP — нет. Трафик Telegram при этом остаётся зашифрованным.</string>
+    <string name="field_verify_tls">Проверять TLS-сертификаты</string>
+    <string name="help_verify_tls">Сверять сертификаты Telegram, Cloudflare и relay с системным хранилищем, как десктопная версия начиная с 1.10.4. Выключайте только на старых устройствах, если в логе ошибки сертификатов.</string>
+    <string name="field_auto_install">Устанавливать обновления автоматически</string>
+    <string name="help_auto_install">Найденное обновление скачивается, проверяется (SHA-256 с GitHub, имя пакета и ключ подписи) и на Android 12+ ставится без диалога; на более старых Android система один раз спросит подтверждение. Прокси после обновления перезапустится сам.</string>
+    <string name="notif_channel_updates">Обновления</string>
+    <string name="update_notif_available">Нажмите, чтобы посмотреть изменения и установить.</string>
+    <string name="update_notif_confirm">Нажмите, чтобы подтвердить установку.</string>
+    <string name="update_notif_failed_title">Не удалось обновиться до %1$s</string>
+    <string name="update_installing">Установка…</string>
+    <string name="stat_route_ms">%1$s · %2$d мс</string>
 </resources>

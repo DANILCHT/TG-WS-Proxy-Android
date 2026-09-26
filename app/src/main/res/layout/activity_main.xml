@@ -376,6 +376,109 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- ======================== whitelist bypass ========================== -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.TgWsProxy.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/relayHeader"
+                        style="@style/Widget.TgWsProxy.SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_relay"
+                                android:textAppearance="?attr/textAppearanceSubtitle1"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/section_relay_sub"
+                                android:textAppearance="?attr/textAppearanceCaption" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/relayChevron"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:contentDescription="@string/action_expand"
+                            android:src="@drawable/ic_expand_more" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/relayContent"
+                        style="@style/Widget.TgWsProxy.SectionContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_relay_intro" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:hint="@string/field_relays">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/relaysInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="top"
+                                android:inputType="textUri|textMultiLine"
+                                android:minLines="2"
+                                android:typeface="monospace" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_relays" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/relayFirstSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_relay_first" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_relay_first" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/relayGuideButton"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/action_relay_guide" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- =========================== connection =========================== -->
             <com.google.android.material.card.MaterialCardView
                 style="@style/Widget.TgWsProxy.SectionCard"
@@ -714,6 +817,19 @@
                                 android:inputType="textUri"
                                 android:singleLine="true" />
                         </com.google.android.material.textfield.TextInputLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/noSecureSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_no_secure" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_no_secure" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -837,6 +953,19 @@
                             android:text="@string/help_autostart" />
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/verifyTlsSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_verify_tls" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_verify_tls" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/verboseSwitch"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -934,6 +1063,19 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="@string/help_auto_update" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/autoInstallSwitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/field_auto_install" />
+
+                        <TextView
+                            style="@style/Widget.TgWsProxy.Help"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/help_auto_install" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/checkUpdateButton"

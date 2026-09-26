@@ -1,0 +1,19 @@
+[Unit]
+Description=TG WS Proxy relay (WebSocket -> Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=RELAY_PORT=8080
+Environment=RELAY_KEY=CHANGE_ME
+ExecStart=/usr/bin/python3 -u /opt/tg_ws_relay.py
+Restart=always
+RestartSec=3
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

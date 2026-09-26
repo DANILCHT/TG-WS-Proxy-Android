@@ -1,13 +1,12 @@
 package com.flowseal.tgwsproxy.core
 
-import java.net.HttpURLConnection
-import java.net.URL
+import com.flowseal.tgwsproxy.net.HttpLite
 
 /**
  * Checks the GitHub Releases API for a newer APK.
  *
  * The parsing and comparison halves are deliberately free of Android APIs so
- * they can be unit-tested on the JVM; only [fetch] touches the network.
+ * they can be unit-tested on the JVM; only [check] touches the network.
  */
 object UpdateChecker {
 
@@ -19,13 +18,15 @@ object UpdateChecker {
         "https://github.com/DANILCHT/TG-WS-Proxy-Android/releases/latest"
 
     private const val MAX_BODY = 512 * 1024
-    private const val TIMEOUT_MS = 10_000
+    private const val TIMEOUT_MS = 15_000
 
     class Release(
         val version: String,
         val apkUrl: String,
         val notes: String,
         val sizeBytes: Long,
+        /** Lowercase hex SHA-256 of the APK when GitHub reports it, else null. */
+        val sha256: String? = null,
     )
 
     /** True when the last [check] could not reach GitHub at all. */
@@ -38,9 +39,18 @@ object UpdateChecker {
      * when up to date, unreachable or the release carries no APK.
      */
     fun check(currentVersion: String): Release? {
-        val body = runCatching { fetch(URL(RELEASES_API)) }
-            .onFailure { Logger.d("Update check failed: $it") }
-            .getOrNull()
+        val body = runCatching {
+            val resp = HttpLite.request(
+                HttpLite.Request(
+                    url = RELEASES_API,
+                    timeoutMs = TIMEOUT_MS,
+                    headers = mapOf("Accept" to "application/vnd.github+json"),
+                    maxBytes = MAX_BODY,
+                )
+            )
+            if (resp.status != 200) throw java.io.IOException("HTTP ${resp.status}")
+            resp.text()
+        }.onFailure { Logger.d("Update check failed: $it") }.getOrNull()
         lastCheckFailed = body == null
         if (body == null) return null
 
@@ -51,13 +61,29 @@ object UpdateChecker {
 
     /** Extracts the release info from the GitHub API payload. */
     fun parse(json: String): Release? {
-        val tag = stringField(json, "tag_name") ?: return null
-        val apk = firstApkUrl(json) ?: return null
+        val root = runCatching { MiniJson.parse(json) }.getOrNull() as? Map<*, *> ?: return null
+        val tag = root["tag_name"] as? String ?: return null
+        if (root["draft"] == true || root["prerelease"] == true) return null
+        val assets = root["assets"] as? List<*> ?: return null
+
+        // Prefer an asset literally named *.apk; among several, the release build.
+        val apks = assets.mapNotNull { it as? Map<*, *> }.filter { a ->
+            val url = a["browser_download_url"] as? String ?: return@filter false
+            url.startsWith("https://") && url.endsWith(".apk", ignoreCase = true)
+        }
+        val apk = apks.firstOrNull { (it["name"] as? String)?.contains("release") == true }
+            ?: apks.firstOrNull() ?: return null
+
+        val digest = (apk["digest"] as? String)?.lowercase()
+            ?.removePrefix("sha256:")
+            ?.takeIf { d -> d.length == 64 && d.all { it in '0'..'9' || it in 'a'..'f' } }
+
         return Release(
             version = normalize(tag),
-            apkUrl = apk,
-            notes = stringField(json, "body").orEmpty(),
-            sizeBytes = apkSize(json),
+            apkUrl = apk["browser_download_url"] as String,
+            notes = root["body"] as? String ?: "",
+            sizeBytes = (apk["size"] as? Number)?.toLong() ?: 0L,
+            sha256 = digest,
         )
     }
 
@@ -86,111 +112,4 @@ object UpdateChecker {
         normalize(v)
             .split('.', '-', '+', '_')
             .mapNotNull { part -> part.takeWhile { it.isDigit() }.toIntOrNull() }
-
-    // --------------------------------------------------------------- JSON bits
-
-    /**
-     * Minimal string-field reader. A full JSON parser is overkill for two
-     * fields, and org.json is not available in unit tests.
-     */
-    internal fun stringField(json: String, name: String): String? {
-        val key = "\"$name\""
-        var i = json.indexOf(key)
-        while (i >= 0) {
-            var p = i + key.length
-            while (p < json.length && json[p].isWhitespace()) p++
-            if (p < json.length && json[p] == ':') {
-                p++
-                while (p < json.length && json[p].isWhitespace()) p++
-                if (p < json.length && json[p] == '"') return readString(json, p + 1)
-                return null
-            }
-            i = json.indexOf(key, i + 1)
-        }
-        return null
-    }
-
-    private fun readString(json: String, start: Int): String {
-        val sb = StringBuilder()
-        var p = start
-        while (p < json.length) {
-            val c = json[p]
-            if (c == '\\' && p + 1 < json.length) {
-                when (val esc = json[p + 1]) {
-                    'n' -> sb.append('\n')
-                    'r' -> sb.append('\r')
-                    't' -> sb.append('\t')
-                    'u' -> {
-                        if (p + 5 < json.length) {
-                            val hex = json.substring(p + 2, p + 6)
-                            hex.toIntOrNull(16)?.let { sb.append(it.toChar()) }
-                            p += 4
-                        }
-                    }
-
-                    else -> sb.append(esc)
-                }
-                p += 2
-                continue
-            }
-            if (c == '"') break
-            sb.append(c)
-            p++
-        }
-        return sb.toString()
-    }
-
-    /** First browser_download_url ending in .apk. */
-    internal fun firstApkUrl(json: String): String? {
-        val key = "\"browser_download_url\""
-        var i = json.indexOf(key)
-        while (i >= 0) {
-            val quote = json.indexOf('"', json.indexOf(':', i + key.length) + 1)
-            if (quote < 0) return null
-            val url = readString(json, quote + 1)
-            if (url.endsWith(".apk", ignoreCase = true) && url.startsWith("https://")) {
-                return url
-            }
-            i = json.indexOf(key, i + 1)
-        }
-        return null
-    }
-
-    private fun apkSize(json: String): Long {
-        val i = json.indexOf("\"size\"")
-        if (i < 0) return 0
-        val colon = json.indexOf(':', i)
-        if (colon < 0) return 0
-        val digits = json.drop(colon + 1).trimStart().takeWhile { it.isDigit() }
-        return digits.toLongOrNull() ?: 0
-    }
-
-    // ------------------------------------------------------------------ network
-
-    @Throws(Exception::class)
-    private fun fetch(url: URL): String {
-        val conn = NetworkBinder.openConnection(url) as HttpURLConnection
-        conn.connectTimeout = TIMEOUT_MS
-        conn.readTimeout = TIMEOUT_MS
-        conn.setRequestProperty("Accept", "application/vnd.github+json")
-        conn.setRequestProperty("User-Agent", "tg-ws-proxy-android")
-        try {
-            if (conn.responseCode != 200) {
-                throw java.io.IOException("HTTP ${conn.responseCode}")
-            }
-            val sb = StringBuilder()
-            conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                val buf = CharArray(8 * 1024)
-                while (true) {
-                    val n = reader.read(buf)
-                    if (n <= 0) break
-                    sb.append(buf, 0, n)
-                    if (sb.length > MAX_BODY) break
-                }
-            }
-            return sb.toString()
-        } finally {
-            conn.disconnect()
-        }
-    }
 }

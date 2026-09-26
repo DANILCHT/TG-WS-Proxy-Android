@@ -9,6 +9,7 @@ class ProxyConfig {
     var port: Int = 1443
     var host: String = "127.0.0.1"
     var secret: String = Crypto.randomHex(16)
+    /** May be empty (upstream `--dc-ip` with no value): every DC goes through fallbacks. */
     var dcRedirects: Map<Int, String> = mapOf(
         2 to "149.154.167.220",
         4 to "149.154.167.220",
@@ -43,6 +44,23 @@ class ProxyConfig {
      */
     var mobileEvasion: Boolean = true
 
+    /** Upstream `disable_secure` (--no-secure): ws:// on port 80 for CF proxy/worker. */
+    var disableSecure: Boolean = false
+
+    /** Upstream 1.10.4 verifies upstream TLS certificates; off for old devices. */
+    var verifyTls: Boolean = true
+
+    /** Self-hosted relays (whitelist bypass), see [RelayEndpoint]. */
+    var relays: List<String> = emptyList()
+
+    /** Try relays before everything else and keep them warm for every DC. */
+    var relayFirst: Boolean = false
+
+    /** Worker domains and relays combined into one ordered endpoint list. */
+    fun relayEndpoints(): List<RelayEndpoint> =
+        RelayEndpoint.parseList(relays, defaultSecure = true) +
+            RelayEndpoint.parseList(cfproxyWorkerDomains, defaultSecure = !disableSecure)
+
     fun copy(): ProxyConfig {
         val c = ProxyConfig()
         c.port = port
@@ -63,6 +81,10 @@ class ProxyConfig {
         c.frontingSni = frontingSni
         c.bypassVpn = bypassVpn
         c.mobileEvasion = mobileEvasion
+        c.disableSecure = disableSecure
+        c.verifyTls = verifyTls
+        c.relays = relays.toList()
+        c.relayFirst = relayFirst
         return c
     }
 

@@ -38,6 +38,12 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         const val KEY_AUTO_UPDATE_CHECK = "auto_update_check"
         const val KEY_UPDATE_SKIPPED = "update_skipped_version"
         const val KEY_UPDATE_LAST_CHECK = "update_last_check"
+        const val KEY_AUTO_INSTALL_UPDATES = "auto_install_updates"
+        const val KEY_RELAYS = "relays"
+        const val KEY_RELAY_FIRST = "relay_first"
+        const val KEY_VERIFY_TLS = "verify_tls"
+        const val KEY_NO_SECURE = "no_secure"
+        const val KEY_WAS_RUNNING = "was_running"
 
         const val DEFAULT_PORT = 1443
         const val DEFAULT_HOST = "127.0.0.1"
@@ -78,8 +84,16 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         }
         set(v) = prefs.edit().putString(KEY_SECRET, v).apply()
 
+    /**
+     * Unset means the defaults; an explicitly empty list is kept, like
+     * upstream's bare `--dc-ip`: every DC then goes through the fallbacks
+     * (the documented fix for media not loading on non-Premium accounts).
+     */
     var dcIp: List<String>
-        get() = splitList(prefs.getString(KEY_DC_IP, null)) .ifEmpty { DEFAULT_DC_IP }
+        get() {
+            val raw = prefs.getString(KEY_DC_IP, null) ?: return DEFAULT_DC_IP
+            return splitList(raw)
+        }
         set(v) = prefs.edit().putString(KEY_DC_IP, v.joinToString(",")).apply()
 
     var verbose: Boolean
@@ -167,6 +181,40 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_AUTO_UPDATE_CHECK, true)
         set(v) = prefs.edit().putBoolean(KEY_AUTO_UPDATE_CHECK, v).apply()
 
+    /** Download and install found updates without asking (needs [autoUpdateCheck]). */
+    var autoInstallUpdates: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_INSTALL_UPDATES, true)
+        set(v) = prefs.edit().putBoolean(KEY_AUTO_INSTALL_UPDATES, v).apply()
+
+    var relays: List<String>
+        get() = splitList(prefs.getString(KEY_RELAYS, null))
+        set(v) = prefs.edit().putString(KEY_RELAYS, v.joinToString("\n")).apply()
+
+    var relayFirst: Boolean
+        get() = prefs.getBoolean(KEY_RELAY_FIRST, false)
+        set(v) = prefs.edit().putBoolean(KEY_RELAY_FIRST, v).apply()
+
+    var verifyTls: Boolean
+        get() = prefs.getBoolean(KEY_VERIFY_TLS, true)
+        set(v) = prefs.edit().putBoolean(KEY_VERIFY_TLS, v).apply()
+
+    /** Upstream `no_secure`: CF proxy and Workers over ws:// on port 80. */
+    var noSecure: Boolean
+        get() = prefs.getBoolean(KEY_NO_SECURE, false)
+        set(v) = prefs.edit().putBoolean(KEY_NO_SECURE, v).apply()
+
+    /**
+     * True while the proxy runs and the user has not stopped it; lets the app
+     * come back up after a self-update or after the process was killed.
+     */
+    var wasRunning: Boolean
+        get() = prefs.getBoolean(KEY_WAS_RUNNING, false)
+        // commit(): read right before the process may be killed by an update.
+        @android.annotation.SuppressLint("ApplySharedPref")
+        set(v) {
+            prefs.edit().putBoolean(KEY_WAS_RUNNING, v).commit()
+        }
+
     /** Version the user chose to skip, so it is not offered again. */
     var skippedUpdate: String
         get() = prefs.getString(KEY_UPDATE_SKIPPED, "").orEmpty()
@@ -190,6 +238,10 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         cfg.secret = secret
         cfg.dcRedirects = runCatching { ProxyConfig.parseDcIpList(dcIp) }
             .getOrElse { ProxyConfig.parseDcIpList(DEFAULT_DC_IP) }
+        cfg.relays = relays
+        cfg.relayFirst = relayFirst
+        cfg.verifyTls = verifyTls
+        cfg.disableSecure = noSecure
         cfg.bufferSize = maxOf(4, bufKb) * 1024
         cfg.poolSize = maxOf(0, poolSize)
         cfg.fallbackCfproxy = cfproxy
@@ -238,6 +290,13 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         }
         if (!ProxyConfig.isValidDomain(frontingSni)) {
             return "Fronting SNI is not a valid domain name"
+        }
+        val badRelays = RelayEndpoint.invalidEntries(relays)
+        if (badRelays.isNotEmpty()) {
+            return "Invalid relay address: ${badRelays.first()}"
+        }
+        if (relayFirst && relays.isEmpty() && !cfWorkerEnabled) {
+            return "\"Relay first\" needs at least one relay or Worker"
         }
         return null
     }

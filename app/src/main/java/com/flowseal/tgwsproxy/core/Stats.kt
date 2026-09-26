@@ -10,6 +10,7 @@ object Stats {
     val connectionsWs = AtomicLong()
     val connectionsTcpFallback = AtomicLong()
     val connectionsCfproxy = AtomicLong()
+    val connectionsRelay = AtomicLong()
     val connectionsFronting = AtomicLong()
     val connectionsBad = AtomicLong()
     val connectionsMasked = AtomicLong()
@@ -21,12 +22,28 @@ object Stats {
     val cfPoolHits = AtomicLong()
     val cfPoolMisses = AtomicLong()
 
+    /** Smoothed time from handshake to an open upstream, ms (0 = no data yet). */
+    @Volatile
+    var connectMsAvg: Long = 0
+        private set
+
+    @Volatile
+    var lastRoute: String = ""
+
+    fun recordConnect(ms: Long, route: String) {
+        lastRoute = route
+        val prev = connectMsAvg
+        connectMsAvg = if (prev == 0L) ms else (prev * 3 + ms) / 4
+    }
+
     fun reset() {
         for (c in listOf(
             connectionsTotal, connectionsActive, connectionsWs, connectionsTcpFallback,
-            connectionsCfproxy, connectionsFronting, connectionsBad, connectionsMasked,
+            connectionsCfproxy, connectionsRelay, connectionsFronting, connectionsBad, connectionsMasked,
             wsErrors, bytesUp, bytesDown, poolHits, poolMisses, cfPoolHits, cfPoolMisses,
         )) c.set(0)
+        connectMsAvg = 0
+        lastRoute = ""
     }
 
     fun summary(): String {
@@ -39,11 +56,13 @@ object Stats {
             "ws=${connectionsWs.get()} " +
             "tcp_fb=${connectionsTcpFallback.get()} " +
             "cf=${connectionsCfproxy.get()} " +
+            "relay=${connectionsRelay.get()} " +
             "front=${connectionsFronting.get()} " +
             "bad=${connectionsBad.get()} " +
             "masked=${connectionsMasked.get()} " +
             "err=${wsErrors.get()} " +
             "pool=$poolS " +
+            (if (connectMsAvg > 0) "connect=${connectMsAvg}ms " else "") +
             "cf_pool=$cfS " +
             "up=${Const.humanBytes(bytesUp.get())} " +
             "down=${Const.humanBytes(bytesDown.get())}"
