@@ -2,7 +2,6 @@ package com.flowseal.tgwsproxy.net
 
 import com.flowseal.tgwsproxy.core.Crypto
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
@@ -151,75 +150,6 @@ class TlsFragmenterTest {
         }
     }
 
-    // ----------------------------------------------------------- record split
-
-    @Test
-    fun helloBecomesTwoRecordsWithTheSamePayload() {
-        val host = "kws2.web.telegram.org"
-        val hello = clientHello(host)
-        val cut = TlsFragmenter.splitPoint(hello, hello.size)
-        val (a, b) = TlsFragmenter.splitIntoRecords(hello, hello.size, cut)!!
-
-        // Each piece is a well-formed handshake record with the original version.
-        for (rec in listOf(a, b)) {
-            assertEquals(0x16, rec[0].toInt() and 0xFF)
-            assertEquals(hello[1], rec[1])
-            assertEquals(hello[2], rec[2])
-            assertEquals(rec.size - 5, ((rec[3].toInt() and 0xFF) shl 8) or (rec[4].toInt() and 0xFF))
-        }
-        assertTrue(records(a + b).contentEquals(hello.copyOfRange(5, hello.size)))
-
-        val needle = host.toByteArray(Charsets.US_ASCII)
-        assertTrue(indexOf(a, needle) < 0)
-        assertTrue(indexOf(b, needle) < 0)
-    }
-
-    @Test
-    fun trailingBytesFollowTheSecondRecord() {
-        val hello = clientHello("example.org")
-        val tail = byteArrayOf(1, 2, 3, 4)
-        val data = hello + tail
-        val cut = TlsFragmenter.splitPoint(data, data.size)
-        val (_, b) = TlsFragmenter.splitIntoRecords(data, data.size, cut)!!
-        assertTrue(b.copyOfRange(b.size - 4, b.size).contentEquals(tail))
-    }
-
-    @Test
-    fun recordSplitRefusesIncompleteOrForeignData() {
-        val hello = clientHello("example.org")
-        assertNull(TlsFragmenter.splitIntoRecords(hello, hello.size - 1, 40))
-        assertNull(TlsFragmenter.splitIntoRecords(hello, hello.size, 3))
-        assertNull(TlsFragmenter.splitIntoRecords(hello, hello.size, hello.size))
-        val appData = ByteArray(100) { 0x17 }
-        assertNull(TlsFragmenter.splitIntoRecords(appData, appData.size, 40))
-    }
-
-    // ------------------------------------------------------------- HTTP split
-
-    private fun upgradeRequest(host: String) = (
-        "GET /apiws HTTP/1.1\r\nHost: $host\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-            "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\nSec-WebSocket-Version: 13\r\n\r\n"
-        ).toByteArray(Charsets.ISO_8859_1)
-
-    @Test
-    fun httpSplitLandsInsideTheHost() {
-        val host = "kws2.example.co.uk"
-        val req = upgradeRequest(host)
-        val cut = TlsFragmenter.httpSplitPoint(req, req.size)
-        val hostStart = indexOf(req, host.toByteArray(Charsets.US_ASCII))
-        assertTrue(cut > hostStart && cut < hostStart + host.length)
-    }
-
-    @Test
-    fun httpSplitIgnoresOtherData() {
-        val hello = clientHello("example.org")
-        assertEquals(-1, TlsFragmenter.httpSplitPoint(hello, hello.size))
-        val post = "POST / HTTP/1.1\r\nHost: a.example.com\r\n\r\n".toByteArray()
-        assertEquals(-1, TlsFragmenter.httpSplitPoint(post, post.size))
-        val noHost = "GET / HTTP/1.1\r\nX: y\r\n\r\n".toByteArray()
-        assertEquals(-1, TlsFragmenter.httpSplitPoint(noHost, noHost.size))
-    }
-
     // ------------------------------------------------------------ stream tests
 
     @Test
@@ -230,22 +160,28 @@ class TlsFragmenterTest {
 
         out.write(hello, 0, hello.size)
         assertEquals(2, sink.writes.size)
-        // Two records: one extra 5-byte header, same handshake bytes.
-        assertEquals(hello.size + 5, sink.writes[0].size + sink.writes[1].size)
-        assertTrue(records(sink.data()).contentEquals(hello.copyOfRange(5, hello.size)))
+        // TCP segmentation only: the bytes, and so the TLS record, stay as they were.
+        assertTrue(sink.writes[0].size + sink.writes[1].size == hello.size)
+        assertTrue(sink.data().contentEquals(hello))
 
         val payload = Crypto.randomBytes(100)
         out.write(payload, 0, payload.size)
         assertEquals(3, sink.writes.size)
-        assertTrue(sink.writes[2].contentEquals(payload))
     }
 
+    /**
+     * A plain HTTP upgrade must leave in one piece: cut inside its Host header
+     * it got the whole flow frozen after ~32 KB on a Russian home Wi-Fi.
+     */
     @Test
-    fun httpRequestIsSplitAsIs() {
+    fun httpRequestGoesOutWhole() {
         val sink = RecordingStream()
-        val req = upgradeRequest("kws4.example.co.uk")
+        val req = (
+            "GET /apiws HTTP/1.1\r\nHost: kws4.example.co.uk\r\nUpgrade: websocket\r\n" +
+                "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            ).toByteArray(Charsets.ISO_8859_1)
         FragmentingOutputStream(sink, 0).write(req, 0, req.size)
-        assertEquals(2, sink.writes.size)
+        assertEquals(1, sink.writes.size)
         assertTrue(sink.data().contentEquals(req))
     }
 
@@ -266,20 +202,7 @@ class TlsFragmenterTest {
         FragmentingOutputStream(sink, 0).write(padded, 7, hello.size)
 
         assertEquals(2, sink.writes.size)
-        assertTrue(records(sink.data()).contentEquals(hello.copyOfRange(5, hello.size)))
-    }
-
-    /** Concatenated payloads of the TLS records in [data]. */
-    private fun records(data: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream()
-        var p = 0
-        while (p + 5 <= data.size) {
-            val len = ((data[p + 3].toInt() and 0xFF) shl 8) or (data[p + 4].toInt() and 0xFF)
-            out.write(data, p + 5, len)
-            p += 5 + len
-        }
-        assertEquals("records must cover the whole buffer", data.size, p)
-        return out.toByteArray()
+        assertTrue(sink.data().contentEquals(hello))
     }
 
     private class RecordingStream : OutputStream() {

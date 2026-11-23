@@ -88,24 +88,32 @@ class LiveRoutesTest {
         } finally {
             ws.abort()
         }
-        assertTrue("ClientHello was not split", log.contains("ClientHello split into two TLS records"))
+        assertTrue("ClientHello was not split", log.contains("ClientHello split at"))
     }
 
+    /** A split plain HTTP request got flows frozen by Russian DPI: it must go out whole. */
     @Test
-    fun plainHttpUpgradeIsSplitInsideHost() {
+    fun plainHttpUpgradeIsNeverSplit() {
         assumeTrue(live)
         log.setLength(0)
-        val base = ProxyConfig.CFPROXY_DEFAULT_DOMAINS.first()
-        val ws = RawWebSocket.connect(
-            host = "kws2.$base", domain = "kws2.$base", timeoutMs = 8_000, secure = false,
-            splitFirstPacket = true,
-        )
-        try {
-            println("split HTTP via kws2.$base -> ${MtprotoProbe.check(ws, 2) ?: "resPQ"}")
-        } finally {
-            ws.abort()
+        var answered = 0
+        for (base in ProxyConfig.CFPROXY_DEFAULT_DOMAINS.take(3)) {
+            val r = runCatching {
+                val ws = RawWebSocket.connect(
+                    host = "kws2.$base", domain = "kws2.$base", timeoutMs = 8_000, secure = false,
+                    splitFirstPacket = true,
+                )
+                try {
+                    MtprotoProbe.check(ws, 2)
+                } finally {
+                    ws.abort()
+                }
+            }.getOrElse { "error: $it" }
+            println("HTTP via kws2.$base -> ${r ?: "resPQ"}")
+            if (r == null) answered++
         }
-        assertTrue("HTTP request was not split", log.contains("HTTP request split inside Host"))
+        assertTrue("no CF domain answered over HTTP", answered > 0)
+        assertTrue("plain HTTP request was split", !log.contains("split"))
     }
 
     // ------------------------------------------------------------ full engine

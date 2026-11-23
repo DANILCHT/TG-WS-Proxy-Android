@@ -40,63 +40,6 @@ object TlsFragmenter {
         return if (len > FALLBACK_SPLIT) FALLBACK_SPLIT else -1
     }
 
-    /**
-     * Re-frames the first TLS record of [data] as two records split at [cut]
-     * (an offset inside that record's payload, counted from the start of
-     * [data]). Returns the two pieces to send as separate TCP segments: the
-     * first record, then the second one followed by whatever came after the
-     * original record. Null when [data] does not start with one complete
-     * handshake record or [cut] is not inside its payload.
-     *
-     * A ClientHello spread over two records hides the SNI from filters that
-     * reassemble the TCP stream but parse only the first TLS record (the
-     * `tlsrec` trick of zapret/ByeDPI). Servers must accept fragmented
-     * handshake messages, and Cloudflare and Telegram do.
-     */
-    fun splitIntoRecords(data: ByteArray, len: Int, cut: Int): Pair<ByteArray, ByteArray>? {
-        if (len < RECORD_HEADER + 2) return null
-        if ((data[0].toInt() and 0xFF) != TYPE_HANDSHAKE) return null
-        val recLen = u16(data, 3, len) ?: return null
-        val recEnd = RECORD_HEADER + recLen
-        if (recEnd > len) return null
-        if (cut <= RECORD_HEADER || cut >= recEnd) return null
-
-        val firstBody = cut - RECORD_HEADER
-        val secondBody = recLen - firstBody
-        val trailing = len - recEnd
-
-        val first = ByteArray(RECORD_HEADER + firstBody)
-        System.arraycopy(data, 0, first, 0, 3) // content type + legacy version
-        first[3] = ((firstBody shr 8) and 0xFF).toByte()
-        first[4] = (firstBody and 0xFF).toByte()
-        System.arraycopy(data, RECORD_HEADER, first, RECORD_HEADER, firstBody)
-
-        val second = ByteArray(RECORD_HEADER + secondBody + trailing)
-        System.arraycopy(data, 0, second, 0, 3)
-        second[3] = ((secondBody shr 8) and 0xFF).toByte()
-        second[4] = (secondBody and 0xFF).toByte()
-        System.arraycopy(data, cut, second, RECORD_HEADER, secondBody + trailing)
-        return first to second
-    }
-
-    /**
-     * Split point in the middle of the Host header value of an HTTP request, or
-     * -1. Used for plain ws:// connections (port 80), where the domain travels
-     * in the Host header instead of the SNI.
-     */
-    fun httpSplitPoint(data: ByteArray, len: Int): Int {
-        if (len < 16) return -1
-        val head = String(data, 0, minOf(len, 4096), Charsets.ISO_8859_1)
-        if (!head.startsWith("GET ")) return -1
-        val marker = head.indexOf("\r\nHost:", ignoreCase = true)
-        if (marker < 0) return -1
-        var start = marker + "\r\nHost:".length
-        while (start < head.length && head[start] == ' ') start++
-        val end = head.indexOf("\r\n", start)
-        if (end < 0 || end - start < 2) return -1
-        return start + (end - start) / 2
-    }
-
     /** Returns offset and length of the SNI hostname bytes, or null. */
     private fun findSniHost(data: ByteArray, len: Int): Pair<Int, Int>? {
         var p = RECORD_HEADER + 1 // handshake type

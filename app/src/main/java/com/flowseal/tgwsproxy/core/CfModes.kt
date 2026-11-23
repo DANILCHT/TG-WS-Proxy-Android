@@ -18,9 +18,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *  - wins are counted per mode and the mode that wins more often is tried
  *    first (`cf_prefers_tls`). With no data plain HTTP goes first: that is what
  *    still works on most filtered networks;
- *  - TLS sessions that die right after their first ~16 KB (the throttling
- *    Russian ISPs apply to TLS towards Cloudflare) put TLS behind HTTP for
- *    [FREEZE_PENALTY_MS].
+ *  - sessions that the network freezes put their mode behind the other one
+ *    for [FREEZE_PENALTY_MS]: TLS that dies after its first ~16 KB down (the
+ *    throttling Russian ISPs apply to TLS towards Cloudflare), or any mode
+ *    where tens of KB go up and not a single byte comes back.
  *
  * Everything is forgotten on a network change, see [reset].
  */
@@ -29,20 +30,23 @@ object CfModes {
     /** Upstream CF_TIMEOUT_COOLDOWN. */
     const val FAIL_COOLDOWN_MS = 30_000L
 
-    /** How long TLS stays behind plain HTTP once sessions over it freeze. */
+    /** How long a mode whose sessions freeze stays behind the other one. */
     const val FREEZE_PENALTY_MS = 10 * 60_000L
 
-    /** Frozen TLS sessions within [FREEZE_WINDOW_MS] that trigger the penalty. */
+    /** Frozen sessions of one mode within [FREEZE_WINDOW_MS] that trigger the penalty. */
     const val FREEZE_REPORTS = 2
     const val FREEZE_WINDOW_MS = 3 * 60_000L
 
     private val cooldownUntil = ConcurrentHashMap<String, Long>()
     private val tlsWins = AtomicInteger()
     private val plainWins = AtomicInteger()
-    private val freezes = ArrayDeque<Long>() // guarded by this
+    private val freezes = HashMap<Boolean, ArrayDeque<Long>>() // guarded by this
 
     @Volatile
     private var tlsPenaltyUntil = 0L
+
+    @Volatile
+    private var plainPenaltyUntil = 0L
 
     @Synchronized
     fun reset() {
@@ -51,15 +55,23 @@ object CfModes {
         plainWins.set(0)
         freezes.clear()
         tlsPenaltyUntil = 0L
+        plainPenaltyUntil = 0L
     }
 
-    private fun key(host: String, tls: Boolean) = "${host.lowercase()}|${if (tls) "tls" else "http"}"
+    private fun key(host: String, tls: Boolean) = "${host.lowercase()}|${modeName(tls)}"
+
+    fun modeName(tls: Boolean) = if (tls) "tls" else "http"
+
+    fun penalized(tls: Boolean, now: Long = System.currentTimeMillis()): Boolean =
+        now < (if (tls) tlsPenaltyUntil else plainPenaltyUntil)
 
     /** True when TLS should be attempted before plain HTTP. */
-    fun tlsFirst(now: Long = System.currentTimeMillis()): Boolean =
-        now >= tlsPenaltyUntil && tlsWins.get() > plainWins.get()
-
-    fun tlsPenalized(now: Long = System.currentTimeMillis()): Boolean = now < tlsPenaltyUntil
+    fun tlsFirst(now: Long = System.currentTimeMillis()): Boolean {
+        val tlsBad = penalized(true, now)
+        val plainBad = penalized(false, now)
+        if (tlsBad != plainBad) return plainBad
+        return tlsWins.get() > plainWins.get()
+    }
 
     fun inCooldown(host: String, tls: Boolean, now: Long = System.currentTimeMillis()): Boolean =
         (cooldownUntil[key(host, tls)] ?: 0L) > now
@@ -98,36 +110,57 @@ object CfModes {
     }
 
     /**
-     * A TLS session through Cloudflare carried a little data and then died.
-     * Returns true when this report switched the penalty on.
+     * A session over [tls] was frozen by the network. Returns true when this
+     * report switched the penalty for that mode on.
      */
     @Synchronized
-    fun reportTlsFreeze(now: Long = System.currentTimeMillis()): Boolean {
-        while (freezes.isNotEmpty() && now - freezes.first() > FREEZE_WINDOW_MS) freezes.removeFirst()
-        freezes.addLast(now)
-        if (freezes.size < FREEZE_REPORTS || now < tlsPenaltyUntil) return false
-        freezes.clear()
-        tlsPenaltyUntil = now + FREEZE_PENALTY_MS
-        tlsWins.set(0)
+    fun reportFreeze(tls: Boolean, now: Long = System.currentTimeMillis()): Boolean {
+        val q = freezes.getOrPut(tls) { ArrayDeque() }
+        while (q.isNotEmpty() && now - q.first() > FREEZE_WINDOW_MS) q.removeFirst()
+        q.addLast(now)
+        if (q.size < FREEZE_REPORTS || penalized(tls, now)) return false
+        q.clear()
+        if (tls) {
+            tlsPenaltyUntil = now + FREEZE_PENALTY_MS
+            tlsWins.set(0)
+        } else {
+            plainPenaltyUntil = now + FREEZE_PENALTY_MS
+            plainWins.set(0)
+        }
         return true
     }
 
     fun describe(now: Long = System.currentTimeMillis()): String {
-        val first = if (tlsFirst(now)) "tls" else "http"
-        val penalty = if (now < tlsPenaltyUntil) ", tls penalized ${(tlsPenaltyUntil - now) / 1000}s" else ""
-        return "$first first (wins tls=${tlsWins.get()} http=${plainWins.get()}$penalty)"
+        val first = modeName(tlsFirst(now))
+        val penalties = listOf(true, false).filter { penalized(it, now) }.joinToString("") { tls ->
+            val until = if (tls) tlsPenaltyUntil else plainPenaltyUntil
+            ", ${modeName(tls)} penalized ${(until - now) / 1000}s"
+        }
+        return "$first first (wins tls=${tlsWins.get()} http=${plainWins.get()}$penalties)"
     }
 
     /**
-     * True for a TLS session that looks frozen by the ISP: some bytes came
-     * down, far less than a working connection would carry, and it ended soon.
-     * Pure so it can be unit-tested.
+     * True for a TLS session that looks throttled: some bytes came down, far
+     * less than a working connection would carry, and it ended soon. Pure so
+     * it can be unit-tested.
      */
     fun looksFrozen(downBytes: Long, upBytes: Long, durationMs: Long): Boolean =
         upBytes > 0 && downBytes in 1..FREEZE_MAX_DOWN_BYTES && durationMs in FREEZE_MIN_MS..FREEZE_MAX_MS
+
+    /**
+     * True for a session (any mode) where a real amount of data went up and
+     * not one byte came back before it ended: the network swallowed the flow.
+     * Telegram acknowledges every request, so a healthy session never looks
+     * like this.
+     */
+    fun looksStalled(downBytes: Long, upBytes: Long, durationMs: Long): Boolean =
+        downBytes == 0L && upBytes >= STALL_MIN_UP_BYTES && durationMs <= STALL_MAX_MS
 
     /** The throttle lets ~16 KB through; leave room for TLS records and frames. */
     const val FREEZE_MAX_DOWN_BYTES = 24L * 1024
     const val FREEZE_MIN_MS = 3_000L
     const val FREEZE_MAX_MS = 90_000L
+
+    const val STALL_MIN_UP_BYTES = 16L * 1024
+    const val STALL_MAX_MS = 60_000L
 }

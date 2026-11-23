@@ -50,8 +50,9 @@ class RawWebSocket private constructor(
          *
          * [secure] = false is upstream's `--no-secure`: plain ws:// on port 80.
          * [verify] defaults to a full check, or chain-only when fronting.
-         * [splitFirstPacket] cuts the ClientHello (TLS) or the upgrade request
-         * (plain) so the name is never whole in one packet.
+         * [splitFirstPacket] sends the TLS ClientHello in two TCP segments.
+         * Plain ws:// requests always go out whole: a split HTTP request gets
+         * the flow frozen by Russian DPI (see [FragmentingSocket]).
          */
         @Throws(Exception::class)
         fun connect(
@@ -82,9 +83,7 @@ class RawWebSocket private constructor(
                     hostnameToVerify = serverName,
                 )
             } else {
-                Tls.connectPlain(
-                    host, port, connectTimeoutMs, bufferSize, fragmentHandshake = splitFirstPacket,
-                ).also {
+                Tls.connectPlain(host, port, connectTimeoutMs, bufferSize).also {
                     it.soTimeout = timeoutMs
                 }
             }

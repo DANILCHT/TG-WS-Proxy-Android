@@ -458,19 +458,32 @@ class Router(
         return out
     }
 
-    /** Freeze detection for TLS sessions through Cloudflare, see [CfModes]. */
-    private fun checkTlsFreeze(label: String, what: String, s: Bridge.Session): Boolean {
-        if (!CfModes.looksFrozen(s.downBytes, s.upBytes, s.durationMs)) return false
-        if (CfModes.reportTlsFreeze()) {
+    /**
+     * True when a session through Cloudflare over [tls] looks frozen by the
+     * network (see [CfModes.looksStalled] / [CfModes.looksFrozen]).
+     */
+    private fun frozenByNetwork(tls: Boolean, s: Bridge.Session): Boolean =
+        CfModes.looksStalled(s.downBytes, s.upBytes, s.durationMs) ||
+            (tls && CfModes.looksFrozen(s.downBytes, s.upBytes, s.durationMs))
+
+    /**
+     * A CF proxy session the network froze: that domain and mode sit out the
+     * cooldown so the next connection goes elsewhere, and repeated freezes put
+     * the whole mode behind the other one.
+     */
+    private fun onCfSessionEnd(label: String, base: String, tls: Boolean, s: Bridge.Session) {
+        if (!frozenByNetwork(tls, s)) return
+        CfModes.reportFailure(base, tls)
+        val mode = CfModes.modeName(tls)
+        if (CfModes.reportFreeze(tls)) {
             Logger.w(
-                "[$label] $what over TLS stalled after ${Const.humanBytes(s.downBytes)}: " +
-                    "the network throttles TLS to Cloudflare -> plain HTTP first for " +
+                "[$label] CF over $mode froze (^${Const.humanBytes(s.upBytes)} " +
+                    "v${Const.humanBytes(s.downBytes)}): ${CfModes.modeName(!tls)} first for " +
                     "${CfModes.FREEZE_PENALTY_MS / 60_000} min"
             )
         } else {
-            Logger.d("[$label] $what over TLS ended after ${Const.humanBytes(s.downBytes)} (possible freeze)")
+            Logger.i("[$label] CF over $mode looks frozen, trying another domain next")
         }
-        return true
     }
 
     // --------------------------------------------------------------- attempts
@@ -532,10 +545,14 @@ class Router(
         )
     }
 
-    /** A Worker over TLS freezing like the CF proxy does: let its plain twin lead. */
+    /** A Worker session the network froze: its other variant (or another relay) leads for a while. */
     private fun onRelaySessionEnd(ep: RelayEndpoint, s: Bridge.Session) {
-        if (!ep.cloudflare || !ep.secure) return
-        if (checkTlsFreeze("relay", "Worker", s)) relayPool.reportFrozen(ep)
+        if (!ep.cloudflare || !frozenByNetwork(ep.secure, s)) return
+        relayPool.reportFrozen(ep)
+        Logger.w(
+            "Worker $ep froze (^${Const.humanBytes(s.upBytes)} v${Const.humanBytes(s.downBytes)}), " +
+                "demoted for ${CfModes.FREEZE_PENALTY_MS / 60_000} min"
+        )
     }
 
     private fun cfAttempt(p: RoutePlanner.Planned, base: String, tls: Boolean, dc: Int): Attempt {
@@ -559,7 +576,7 @@ class Router(
                     if (Balancer.updateDomainForDc(dc, base)) Logger.i("Switched active CF domain for DC$dc")
                 },
                 keepaliveMs = KEEPALIVE_MS,
-                onEnd = { s -> if (tls) checkTlsFreeze("DC$dc", "CF proxy", s) },
+                onEnd = { s -> onCfSessionEnd("DC$dc", base, tls, s) },
             )
         }
     }

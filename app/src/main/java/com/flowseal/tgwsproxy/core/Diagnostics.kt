@@ -285,8 +285,8 @@ object Diagnostics {
                 "Режим белых списков: Telegram и Cloudflare отрезаны. Поможет только relay в разрешённой сети — см. «Обход белых списков».",
             )
             o.tcpOk -> t(
-                "TCP connects but TLS fails — enable the packet split and a split delay.",
-                "TCP подключается, но TLS не проходит — включите разрез первого пакета и паузу между частями.",
+                "TCP connects but TLS fails — enable the TLS split and a split delay.",
+                "TCP подключается, но TLS не проходит — включите разрез TLS-рукопожатия и паузу между частями.",
             )
             else -> t(
                 "Nothing reachable — check the network, VPN or lockdown mode.",

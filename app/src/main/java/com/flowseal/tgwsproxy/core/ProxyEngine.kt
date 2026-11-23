@@ -256,9 +256,9 @@ class ProxyEngine(val config: ProxyConfig) {
         }
         Logger.i("  TLS verify:    ${if (config.verifyTls) "on" else "off"}")
         Logger.i(
-            "  Packet split:  " +
+            "  TLS split:     " +
                 if (config.fragmentClientHello) {
-                    "TLS records + HTTP Host" +
+                    "ClientHello in 2 TCP segments" +
                         if (config.fragmentDelayMs > 0) " (+${config.fragmentDelayMs}ms)" else ""
                 } else {
                     "disabled"
@@ -509,6 +509,9 @@ class ProxyEngine(val config: ProxyConfig) {
             Logger.w("[$label] timeout during handshake")
         } catch (e: EOFException) {
             Logger.d("[$label] client disconnected")
+        } catch (e: InterruptedException) {
+            // The proxy is stopping (workers are interrupted), not an error.
+            Logger.d("[$label] interrupted by shutdown")
         } catch (e: Exception) {
             Logger.e("[$label] unexpected: $e", e)
         } finally {

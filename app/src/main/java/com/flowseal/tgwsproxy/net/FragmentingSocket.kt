@@ -5,16 +5,21 @@ import java.io.OutputStream
 import java.net.Socket
 
 /**
- * A [Socket] whose first write is split so the destination name never sits
- * whole in one packet.
+ * A [Socket] whose first write is split across two TCP segments.
  *
  * `SSLSocketFactory.createSocket(underlying, ...)` writes the ClientHello to
  * `underlying.getOutputStream()`, so overriding that stream is the only seam
- * available for fragmenting the handshake without hand-rolling TLS. Plain
- * ws:// connections write their HTTP upgrade request through the same stream.
+ * available for fragmenting the handshake without hand-rolling TLS.
  *
  * Only the very first write is touched; everything after it goes straight
  * through, so throughput is unaffected.
+ *
+ * Deliberately only TCP segmentation of a TLS ClientHello: a filter that
+ * reassembles the stream still sees a normal handshake. Re-framing the hello
+ * into several TLS records, or cutting a plain HTTP request inside its Host
+ * header, makes the flow unrecognisable to Russian DPI, which then freezes it
+ * after ~32 KB (seen on a home Wi-Fi in 1.12.0: every upload through
+ * Cloudflare stalled until the split was turned off).
  */
 class FragmentingSocket(
     private val delayMs: Long = 0L,
@@ -31,11 +36,9 @@ class FragmentingSocket(
 }
 
 /**
- * Splits the first buffer it is handed:
- *  - a TLS ClientHello becomes two TLS records cut in the middle of the SNI,
- *    each sent in its own TCP segment;
- *  - an HTTP request is cut in the middle of the Host header value.
- * Anything else is written unchanged.
+ * Splits the first buffer it is handed at a point inside the TLS SNI, flushing
+ * between the halves so they leave as separate packets. Anything that is not
+ * a ClientHello is written unchanged.
  */
 internal class FragmentingOutputStream(
     private val inner: OutputStream,
@@ -56,39 +59,23 @@ internal class FragmentingOutputStream(
         }
         firstWriteDone = true
 
-        val data = if (off == 0 && len == b.size) b else b.copyOfRange(off, off + len)
-
-        val tlsCut = TlsFragmenter.splitPoint(data, len)
-        if (tlsCut in 1 until len) {
-            val records = TlsFragmenter.splitIntoRecords(data, len, tlsCut)
-            if (records != null) {
-                sendInTwo(records.first, 0, records.first.size, records.second, 0, records.second.size)
-                Logger.d("ClientHello split into two TLS records at $tlsCut/$len bytes")
-            } else {
-                sendInTwo(data, 0, tlsCut, data, tlsCut, len - tlsCut)
-                Logger.d("ClientHello split at $tlsCut/$len bytes")
-            }
+        val cut = TlsFragmenter.splitPoint(
+            if (off == 0) b else b.copyOfRange(off, off + len),
+            len,
+        )
+        if (cut <= 0 || cut >= len) {
+            inner.write(b, off, len)
             return
         }
 
-        val httpCut = TlsFragmenter.httpSplitPoint(data, len)
-        if (httpCut in 1 until len) {
-            sendInTwo(data, 0, httpCut, data, httpCut, len - httpCut)
-            Logger.d("HTTP request split inside Host at $httpCut/$len bytes")
-            return
-        }
-
-        inner.write(b, off, len)
-    }
-
-    private fun sendInTwo(a: ByteArray, aOff: Int, aLen: Int, c: ByteArray, cOff: Int, cLen: Int) {
-        inner.write(a, aOff, aLen)
+        inner.write(b, off, cut)
         inner.flush()
         if (delayMs > 0) {
             runCatching { Thread.sleep(delayMs) }
         }
-        inner.write(c, cOff, cLen)
+        inner.write(b, off + cut, len - cut)
         inner.flush()
+        Logger.d("ClientHello split at $cut/$len bytes")
     }
 
     override fun write(b: ByteArray) = write(b, 0, b.size)

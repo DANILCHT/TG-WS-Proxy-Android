@@ -59,8 +59,8 @@
     <string name="field_dc_ip">DC IPs (DC:IP, comma separated)</string>
     <string name="hint_dc_ip">Default: 2:149.154.167.220, 4:149.154.167.220. Clear the field if photos and videos do not load.</string>
 
-    <string name="field_tls_split">Split the first packet</string>
-    <string name="help_tls_split">The domain name never leaves in one piece: the TLS handshake is cut into two TLS records in the middle of the name, and an HTTP request (port 80) in the middle of the Host header. Defeats filters that only parse the first packet or the first TLS record — the usual case with ISPs and mobile operators. Costs nothing; leave it on.</string>
+    <string name="field_tls_split">Split TLS handshake</string>
+    <string name="help_tls_split">Sends the first packet of a TLS connection in two parts, so the domain name is cut in half. Defeats filters that only look at the first packet — the usual case on mobile networks. Plain HTTP (port 80) connections are never split: there it gets the flow frozen after ~32 KB. Costs nothing; leave it on.</string>
     <string name="field_tls_split_delay">Pause between parts, ms</string>
     <string name="help_tls_split_delay">0 — send both parts immediately. 10–50 ms helps against filters that reassemble packets, but adds that delay to every new connection.</string>
     <string name="field_fronting_first">Use a neutral domain first</string>

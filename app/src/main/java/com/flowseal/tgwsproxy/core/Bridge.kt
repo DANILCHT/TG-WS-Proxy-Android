@@ -225,6 +225,9 @@ object Bridge {
             while (true) {
                 val n = client.read(buf, 0, CHUNK)
                 if (n <= 0) {
+                    // Telegram closed its side; without this the down thread's
+                    // "Socket closed" would be blamed on the upstream.
+                    reason.compareAndSet("normal", "client: closed")
                     if (splitter != null) {
                         val tail = splitter.flush()
                         if (tail.isNotEmpty()) ws.send(tail[0])
