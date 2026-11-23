@@ -27,7 +27,7 @@ object Const {
 
     val RESERVED_FIRST_BYTES = setOf(0xEF)
 
-    /** Forbidden first 4 bytes of a generated relay init (HEAD/POST/GET /ee/dd/TLS). */
+    /** Forbidden first 4 bytes of a generated relay init (HEAD/POST/GET /ee/dd/TLS/OPTIONS). */
     val RESERVED_STARTS: List<ByteArray> = listOf(
         byteArrayOf(0x48, 0x45, 0x41, 0x44),
         byteArrayOf(0x50, 0x4F, 0x53, 0x54),
@@ -35,6 +35,7 @@ object Const {
         byteArrayOf(0xEE.toByte(), 0xEE.toByte(), 0xEE.toByte(), 0xEE.toByte()),
         byteArrayOf(0xDD.toByte(), 0xDD.toByte(), 0xDD.toByte(), 0xDD.toByte()),
         byteArrayOf(0x16, 0x03, 0x01, 0x02),
+        byteArrayOf(0x4F, 0x50, 0x54, 0x49),
     )
     val RESERVED_CONTINUE = byteArrayOf(0, 0, 0, 0)
 
@@ -56,12 +57,13 @@ object Const {
     const val WS_PATH = "/apiws"
     const val WS_PATH_TEST = WS_PATH + "_test"
 
+    /** Upstream 1.12.0: non-media goes to kwsN only, media tries kwsN-1 first. */
     fun wsDomains(dc: Int, isMedia: Boolean): List<String> {
         val d = if (dc == 203) 2 else dc
         return if (isMedia) {
             listOf("kws$d-1.web.telegram.org", "kws$d.web.telegram.org")
         } else {
-            listOf("kws$d.web.telegram.org", "kws$d-1.web.telegram.org")
+            listOf("kws$d.web.telegram.org")
         }
     }
 

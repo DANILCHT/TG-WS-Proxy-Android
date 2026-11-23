@@ -59,8 +59,8 @@
     <string name="field_dc_ip">DC IPs (DC:IP, comma separated)</string>
     <string name="hint_dc_ip">Default: 2:149.154.167.220, 4:149.154.167.220. Clear the field if photos and videos do not load.</string>
 
-    <string name="field_tls_split">Split TLS handshake</string>
-    <string name="help_tls_split">Sends the first packet of an upstream connection in two parts, so the domain name is cut in half. Defeats filters that only look at the first packet — the usual case on mobile networks. Costs nothing; leave it on.</string>
+    <string name="field_tls_split">Split the first packet</string>
+    <string name="help_tls_split">The domain name never leaves in one piece: the TLS handshake is cut into two TLS records in the middle of the name, and an HTTP request (port 80) in the middle of the Host header. Defeats filters that only parse the first packet or the first TLS record — the usual case with ISPs and mobile operators. Costs nothing; leave it on.</string>
     <string name="field_tls_split_delay">Pause between parts, ms</string>
     <string name="help_tls_split_delay">0 — send both parts immediately. 10–50 ms helps against filters that reassemble packets, but adds that delay to every new connection.</string>
     <string name="field_fronting_first">Use a neutral domain first</string>
@@ -86,7 +86,7 @@
     <string name="help_cf_user_domain">Your own domains behind Cloudflare instead of the public ones. Needs setup on the Cloudflare side.</string>
     <string name="field_cf_user_domain_hint">Domains, comma separated</string>
     <string name="field_cf_worker">Cloudflare Worker fallback</string>
-    <string name="help_cf_worker">A route through your own Cloudflare Worker (docs/CfWorker.md in the desktop project). Races with the other routes; a self-hosted relay can go in “Whitelist bypass”.</string>
+    <string name="help_cf_worker">A route through your own Cloudflare Worker (docs/CfWorker.md in the desktop project). Races with the other routes; a domain without a scheme is tried over both TLS and plain HTTP and the working one is remembered. A self-hosted relay can go in “Whitelist bypass”.</string>
     <string name="field_cf_worker_hint">Worker domains, comma separated</string>
 
     <string name="field_pool_size">WS pool size per DC</string>
@@ -155,8 +155,8 @@
     <string name="field_relay_first">Relay first</string>
     <string name="help_relay_first">Send Telegram through the relay right away and keep a ready connection for every data center. Turn on under whitelists or when the relay is simply the fastest route. Otherwise the relay joins the race with the other routes and wins only when it answers first.</string>
     <string name="action_relay_guide">How to set up a relay</string>
-    <string name="field_no_secure">CF over port 80 without TLS</string>
-    <string name="help_no_secure">Connect to the Cloudflare proxy and Workers over plain ws:// on port 80 (upstream \"no secure\" mode). Helps where TLS to Cloudflare is filtered but plain HTTP is not. Telegram traffic stays encrypted.</string>
+    <string name="field_no_secure">Cloudflare over port 80 only</string>
+    <string name="help_no_secure">By default TLS (port 443) and plain ws:// (port 80) to the Cloudflare proxy and Workers are tried side by side, and the app remembers which one works on this network: since 16.11 many ISPs drop TLS to Cloudflare specifically. Turn this on to use port 80 only (upstream \"no secure\" mode). Telegram traffic stays encrypted either way.</string>
     <string name="field_verify_tls">Verify TLS certificates</string>
     <string name="help_verify_tls">Check the certificates of Telegram, Cloudflare and relays against the system store, as the desktop version does since 1.10.4. Turn off only on old devices where connections fail with certificate errors in the log.</string>
     <string name="field_auto_install">Install updates automatically</string>

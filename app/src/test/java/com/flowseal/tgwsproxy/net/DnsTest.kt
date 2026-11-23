@@ -2,6 +2,7 @@ package com.flowseal.tgwsproxy.net
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,5 +44,19 @@ class DnsTest {
     fun base64UrlHasNoPaddingOrUnsafeChars() {
         val s = Dns.base64Url(byteArrayOf(-1, -2, -3, -4))
         assertTrue(!s.contains('=') && !s.contains('+') && !s.contains('/'))
+    }
+
+    private fun ip(s: String) = java.net.InetAddress.getByAddress(
+        s.split('.').map { it.toInt().toByte() }.toByteArray()
+    )
+
+    @Test
+    fun recognisesCloudflareRanges() {
+        for (a in listOf("104.21.32.1", "172.67.200.5", "188.114.97.3", "162.159.1.1", "104.16.0.0")) {
+            assertTrue(a, Dns.isCloudflare(ip(a)))
+        }
+        for (a in listOf("149.154.167.220", "95.167.1.1", "10.0.0.1", "104.32.0.1", "172.72.0.1")) {
+            assertFalse(a, Dns.isCloudflare(ip(a)))
+        }
     }
 }

@@ -2,6 +2,9 @@ package com.flowseal.tgwsproxy.core
 
 import com.flowseal.tgwsproxy.net.DataStream
 import com.flowseal.tgwsproxy.net.RawWebSocket
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -147,6 +150,27 @@ object Bridge {
     /** Outcome of one relayed session, used to spot routes that connect but carry nothing. */
     class Session(val upBytes: Long, val downBytes: Long, val durationMs: Long, val reason: String)
 
+    private val keepalive = ScheduledThreadPoolExecutor(1) { r ->
+        Thread(r, "ws-keepalive").apply { isDaemon = true }
+    }.apply { removeOnCancelPolicy = true }
+
+    /**
+     * Pings [ws] whenever nothing was sent for [intervalMs]. Checked every
+     * half interval, so the longest silence is 1.5x [intervalMs].
+     */
+    private fun startKeepalive(ws: RawWebSocket, intervalMs: Long): ScheduledFuture<*>? {
+        if (intervalMs <= 0) return null
+        val idleNanos = intervalMs * 1_000_000L
+        val check = (intervalMs / 2).coerceAtLeast(1_000L)
+        return runCatching {
+            keepalive.scheduleWithFixedDelay({
+                if (!ws.closed && System.nanoTime() - ws.lastSendNanos >= idleNanos) {
+                    runCatching { ws.ping() }
+                }
+            }, check, check, TimeUnit.MILLISECONDS)
+        }.getOrNull()
+    }
+
     fun bridgeWsReencrypt(
         client: DataStream,
         ws: RawWebSocket,
@@ -155,6 +179,7 @@ object Bridge {
         dc: Int?,
         isMedia: Boolean,
         splitter: MsgSplitter?,
+        keepaliveMs: Long = 0L,
     ): Session {
         val dcTag = if (dc != null) "DC$dc${if (isMedia) "m" else ""}" else "DC?"
 
@@ -164,6 +189,7 @@ object Bridge {
         val downPackets = AtomicLong()
         val reason = AtomicReference("normal")
         val startTime = System.nanoTime()
+        val pinger = startKeepalive(ws, keepaliveMs)
 
         val downThread = Thread({
             try {
@@ -224,6 +250,7 @@ object Bridge {
             reason.compareAndSet("normal", "client: ${e.javaClass.simpleName}")
             Logger.d("[$label] tcp->ws ended: $e")
         } finally {
+            pinger?.cancel(false)
             runCatching { ws.close() }
             runCatching { client.close() }
             downThread.join(2_000)

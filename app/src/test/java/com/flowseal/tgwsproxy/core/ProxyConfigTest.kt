@@ -129,8 +129,9 @@ class ProxyConfigTest {
 
     @Test
     fun wsDomainsPreferenceMatchesPython() {
+        // Upstream 1.12.0 dropped the kwsN-1 fallback for non-media.
         assertEquals(
-            listOf("kws2.web.telegram.org", "kws2-1.web.telegram.org"),
+            listOf("kws2.web.telegram.org"),
             Const.wsDomains(2, isMedia = false),
         )
         assertEquals(
@@ -139,7 +140,7 @@ class ProxyConfigTest {
         )
         // DC 203 is served by the DC2 endpoints.
         assertEquals(
-            listOf("kws2.web.telegram.org", "kws2-1.web.telegram.org"),
+            listOf("kws2.web.telegram.org"),
             Const.wsDomains(203, isMedia = false),
         )
     }

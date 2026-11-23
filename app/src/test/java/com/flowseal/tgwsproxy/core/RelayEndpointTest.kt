@@ -76,6 +76,42 @@ class RelayEndpointTest {
     }
 
     @Test
+    fun bareWorkerBecomesPlainAndTlsVariants() {
+        val list = RelayEndpoint.parseWorkers(listOf("abc.user.workers.dev"), allowTls = true)
+        assertEquals(listOf(false, true), list.map { it.secure })
+        assertEquals(listOf(80, 443), list.map { it.port })
+        assertTrue(list.all { it.cloudflare && it.host == "abc.user.workers.dev" })
+        assertEquals(2, list.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun noSecureWorkerIsPlainOnly() {
+        val list = RelayEndpoint.parseWorkers(listOf("a.workers.dev, b.workers.dev"), allowTls = false)
+        assertEquals(2, list.size)
+        assertTrue(list.none { it.secure })
+    }
+
+    @Test
+    fun explicitWorkerSchemeIsKept() {
+        val list = RelayEndpoint.parseWorkers(listOf("wss://a.workers.dev", "ws://b.workers.dev:8080"), allowTls = false)
+        assertEquals(listOf(true, false), list.map { it.secure })
+        assertEquals(8080, list[1].port)
+    }
+
+    @Test
+    fun configCombinesRelaysAndWorkerVariants() {
+        val cfg = ProxyConfig()
+        cfg.relays = listOf("wss://relay.example.ru")
+        cfg.cfproxyWorkerDomains = listOf("w.example.workers.dev")
+        val eps = cfg.relayEndpoints()
+        assertEquals(3, eps.size)
+        assertFalse(eps[0].cloudflare)
+        assertEquals(2, eps.count { it.cloudflare })
+        cfg.disableSecure = true
+        assertEquals(2, cfg.relayEndpoints().size)
+    }
+
+    @Test
     fun listDedupesAndReportsInvalid() {
         val list = RelayEndpoint.parseList(listOf("a.example.com\nwss://a.example.com/apiws", "b.example.com"))
         assertEquals(2, list.size)

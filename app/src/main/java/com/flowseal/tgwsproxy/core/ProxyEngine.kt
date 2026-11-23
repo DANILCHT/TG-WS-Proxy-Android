@@ -91,7 +91,14 @@ class ProxyEngine(val config: ProxyConfig) {
         wsPool.reset()
         relayPool.reset()
         router.reset()
+        CfModes.reset()
         Dns.clear()
+        val workerHosts = config.relayEndpoints().filter { it.cloudflare }.map { it.host }.toSet()
+        // Inside a VPN tunnel the VPN's own (often fake-IP) answers must stand.
+        Dns.expectCloudflare = { h ->
+            (h.endsWith(".workers.dev") || h in workerHosts || Balancer.covers(h)) &&
+                !NetworkBinder.insideVpn()
+        }
 
         NetworkBinder.configure(config.bypassVpn)
         // Must happen before warmup below, which opens sockets immediately.
@@ -150,6 +157,7 @@ class ProxyEngine(val config: ProxyConfig) {
         if (stopping.get()) return
         Dns.clear()
         router.reset()
+        CfModes.reset()
         wsPool.flush()
         relayPool.flush()
         applyNetworkProfile()
@@ -233,8 +241,11 @@ class ProxyEngine(val config: ProxyConfig) {
         if (config.cfproxyWorkerDomains.isNotEmpty()) {
             Logger.i("  CF worker:     enabled (${config.cfproxyWorkerDomains.joinToString(", ")})")
         }
-        if (config.disableSecure) {
-            Logger.i("  No secure:     enabled (port 80 for CF proxy/worker)")
+        if (config.fallbackCfproxy || config.cfproxyWorkerDomains.isNotEmpty()) {
+            Logger.i(
+                "  CF transport:  " +
+                    if (config.disableSecure) "HTTP :80 only (no secure)" else "auto (HTTP :80 + TLS :443, remembers what works)"
+            )
         }
         val relays = RelayEndpoint.parseList(config.relays)
         if (relays.isNotEmpty()) {
@@ -245,9 +256,10 @@ class ProxyEngine(val config: ProxyConfig) {
         }
         Logger.i("  TLS verify:    ${if (config.verifyTls) "on" else "off"}")
         Logger.i(
-            "  TLS split:     " +
+            "  Packet split:  " +
                 if (config.fragmentClientHello) {
-                    "enabled" + if (config.fragmentDelayMs > 0) " (+${config.fragmentDelayMs}ms)" else ""
+                    "TLS records + HTTP Host" +
+                        if (config.fragmentDelayMs > 0) " (+${config.fragmentDelayMs}ms)" else ""
                 } else {
                     "disabled"
                 }
@@ -316,7 +328,7 @@ class ProxyEngine(val config: ProxyConfig) {
                 lastStats = now
                 Logger.i(
                     "stats: ${Stats.summary()} | ws_bl: ${router.blacklistSummary(now)} " +
-                        "| routes: ${router.routeSummary(now)}"
+                        "| routes: ${router.routeSummary(now)} | cf: ${CfModes.describe(now)}"
                 )
             }
         }

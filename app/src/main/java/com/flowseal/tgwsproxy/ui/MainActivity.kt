@@ -630,7 +630,7 @@ class MainActivity : AppCompatActivity() {
             .show()
         Thread({
             val cfg = settings.toProxyConfig()
-            val report = Diagnostics.run(cfg)
+            val report = Diagnostics.run(cfg, russian = java.util.Locale.getDefault().language == "ru")
             handler.post {
                 runCatching { progress.dismiss() }
                 if (isFinishing || isDestroyed) return@post

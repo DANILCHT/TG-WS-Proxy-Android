@@ -37,8 +37,9 @@ class WsPool(private val executor: ExecutorService) {
     private val refillFailures = ConcurrentHashMap<Key, Int>()
     private val refillAfter = ConcurrentHashMap<Key, Long>()
 
+    /** Upstream 1.12.0 starts with the real SNI and remembers whichever worked. */
     @Volatile
-    var tryFrontingFirst: Boolean = true
+    var tryFrontingFirst: Boolean = false
         private set
 
     @Volatile
@@ -261,15 +262,18 @@ class WsPool(private val executor: ExecutorService) {
         }
         refillFailures.clear()
         refillAfter.clear()
+        // Learned per network; configure() re-applies fronting-first if set.
+        tryFrontingFirst = false
     }
 
     fun reset() {
         stopped = true
+        // flush() also drops the fronting preference: upstream 1.12.0 starts
+        // with try_fronting_first = False, configure() turns it on when
+        // fronting-first is set (or forced on mobile data).
         flush()
         idle.clear()
         refilling.clear()
-        // Upstream starts with try_fronting_first = True.
-        tryFrontingFirst = true
     }
 
     private fun closeQuiet(ws: RawWebSocket) {

@@ -40,6 +40,8 @@ class RelayEndpoint(
     val sni: String?,
     val key: String?,
     val verifyCert: Boolean,
+    /** A Cloudflare Worker (from the Worker list) rather than a self-hosted relay. */
+    val cloudflare: Boolean = false,
 ) {
     /** Stable identity, used for logs and per-endpoint bookkeeping. */
     val id: String = buildString {
@@ -92,7 +94,7 @@ class RelayEndpoint(
          * (upstream's `--no-secure` switches bare worker domains to port 80).
          * Returns null for anything malformed.
          */
-        fun parse(raw: String, defaultSecure: Boolean = true): RelayEndpoint? {
+        fun parse(raw: String, defaultSecure: Boolean = true, cloudflare: Boolean = false): RelayEndpoint? {
             var s = raw.trim()
             if (s.isEmpty() || s.startsWith("#")) return null
 
@@ -116,10 +118,16 @@ class RelayEndpoint(
             val authority = if (slash >= 0) beforeQuery.substring(0, slash) else beforeQuery
             val path = if (slash >= 0) beforeQuery.substring(slash) else DEFAULT_PATH
 
-            return parseWithPath(authority, path, query, secure)
+            return parseWithPath(authority, path, query, secure, cloudflare)
         }
 
-        private fun parseWithPath(authority: String, path: String, query: String, secure: Boolean): RelayEndpoint? {
+        private fun parseWithPath(
+            authority: String,
+            path: String,
+            query: String,
+            secure: Boolean,
+            cloudflare: Boolean,
+        ): RelayEndpoint? {
             if (authority.isEmpty() || authority.contains('@')) return null
             val colon = authority.lastIndexOf(':')
             val host = (if (colon >= 0) authority.substring(0, colon) else authority).lowercase()
@@ -164,6 +172,7 @@ class RelayEndpoint(
                 sni = sni,
                 key = key,
                 verifyCert = verify,
+                cloudflare = cloudflare,
             )
         }
 
@@ -172,6 +181,32 @@ class RelayEndpoint(
             for (e in entries.flatMap { it.split('\n', ',', ';', ' ') }) {
                 val ep = parse(e, defaultSecure) ?: continue
                 out.putIfAbsent(ep.id, ep)
+            }
+            return out.values.toList()
+        }
+
+        /**
+         * Cloudflare Worker entries. A bare domain becomes two endpoints, plain
+         * ws:// on 80 and wss:// on 443, which then race like any other relay
+         * (upstream 1.12.0 falls back from TLS to HTTP on timeouts; since the
+         * 16.11.2026 blocks TLS is often the one that fails). With [allowTls]
+         * off (`no_secure`) only the plain one is kept. An explicit scheme is
+         * taken as is.
+         */
+        fun parseWorkers(entries: List<String>, allowTls: Boolean): List<RelayEndpoint> {
+            val out = LinkedHashMap<String, RelayEndpoint>()
+            for (raw in entries.flatMap { it.split('\n', ',', ';', ' ') }) {
+                val s = raw.trim()
+                if (s.isEmpty() || s.startsWith("#")) continue
+                val variants = if (s.contains("://")) {
+                    listOf(parse(s, defaultSecure = true, cloudflare = true))
+                } else {
+                    listOf(
+                        parse(s, defaultSecure = false, cloudflare = true),
+                        if (allowTls) parse(s, defaultSecure = true, cloudflare = true) else null,
+                    )
+                }
+                for (ep in variants) if (ep != null) out.putIfAbsent(ep.id, ep)
             }
             return out.values.toList()
         }
@@ -203,8 +238,15 @@ class RelayPool(private val executor: ExecutorService) {
     private val idle = ConcurrentHashMap<Int, ArrayDeque<Entry>>()
     private val refilling: MutableSet<Int> =
         java.util.Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
+
+    /** By host: a Worker's daily quota covers both its TLS and plain variant. */
     private val exhaustedUntil = ConcurrentHashMap<String, Long>()
+
+    /** By endpoint id: recently failed, tried after the healthy ones. */
     private val failedUntil = ConcurrentHashMap<String, Long>()
+
+    /** By endpoint id: when it last carried a connection, newest goes first. */
+    private val lastWin = ConcurrentHashMap<String, Long>()
 
     @Volatile
     private var config: ProxyConfig = ProxyConfig()
@@ -281,7 +323,9 @@ class RelayPool(private val executor: ExecutorService) {
     private fun connectOne(endpoints: List<RelayEndpoint>, dst: String, dc: Int): Pooled? {
         for (ep in availableEndpoints(endpoints)) {
             try {
-                return Pooled(ep.connect(dst, dc, 8_000, config.bufferSize, 5_000), ep)
+                val ws = ep.connect(dst, dc, 8_000, config.bufferSize, 5_000)
+                reportSuccess(ep)
+                return Pooled(ws, ep)
             } catch (e: Exception) {
                 reportFailure(ep, e)
             }
@@ -289,41 +333,65 @@ class RelayPool(private val executor: ExecutorService) {
         return null
     }
 
-    /** Usable endpoints, healthy ones first, shuffled within each group. */
+    /**
+     * Usable endpoints: healthy before recently failed ones. Within each group
+     * the hosts are shuffled to spread load over several Workers, the host
+     * that carried a connection last goes first, and of a Worker's two
+     * variants the one that won last leads (plain ws:// when neither has).
+     */
     fun availableEndpoints(endpoints: List<RelayEndpoint>): List<RelayEndpoint> {
         val now = System.currentTimeMillis()
         val healthy = ArrayList<RelayEndpoint>()
         val suspect = ArrayList<RelayEndpoint>()
         for (ep in endpoints.distinct()) {
-            val until = exhaustedUntil[ep.id] ?: 0L
+            val until = exhaustedUntil[ep.host] ?: 0L
             if (until > now) continue
-            if (until != 0L) exhaustedUntil.remove(ep.id)
+            if (until != 0L) exhaustedUntil.remove(ep.host)
             if ((failedUntil[ep.id] ?: 0L) > now) suspect.add(ep) else healthy.add(ep)
         }
-        healthy.shuffle()
-        suspect.shuffle()
-        return healthy + suspect
+        return order(healthy) + order(suspect)
+    }
+
+    private fun order(list: List<RelayEndpoint>): List<RelayEndpoint> {
+        if (list.size < 2) return list
+        fun won(ep: RelayEndpoint) = lastWin[ep.id] ?: 0L
+        val groups = list.groupBy { it.host }.values.toMutableList()
+        groups.shuffle()
+        return groups
+            .sortedByDescending { g -> g.maxOf { won(it) } }
+            .flatMap { g ->
+                g.sortedWith(compareByDescending<RelayEndpoint> { won(it) }.thenBy { if (it.secure) 1 else 0 })
+            }
     }
 
     fun reportSuccess(ep: RelayEndpoint) {
         failedUntil.remove(ep.id)
+        lastWin[ep.id] = System.currentTimeMillis()
     }
 
     /**
      * HTTP 429 from a Cloudflare Worker means the daily request quota is spent:
-     * disable it until the next UTC day. Other failures only demote it briefly.
+     * disable the Worker (both variants) until the next UTC day. Other failures
+     * only demote the endpoint briefly.
      */
     fun reportFailure(ep: RelayEndpoint, exc: Exception) {
         val now = System.currentTimeMillis()
         if (exc !is WsHandshakeError || exc.statusCode != 429) {
             failedUntil[ep.id] = now + 30_000L
+            lastWin.remove(ep.id)
             return
         }
-        if ((exhaustedUntil[ep.id] ?: 0L) > now) return
+        if ((exhaustedUntil[ep.host] ?: 0L) > now) return
 
         val until = now + (86_400_000L - now % 86_400_000L)
-        exhaustedUntil[ep.id] = until
-        Logger.w("Relay $ep reached its request limit, disabled for ${(until - now) / 1000}s")
+        exhaustedUntil[ep.host] = until
+        Logger.w("Relay ${ep.host} reached its request limit, disabled for ${(until - now) / 1000}s")
+    }
+
+    /** A TLS session through this endpoint froze after a few KB: try others first for a while. */
+    fun reportFrozen(ep: RelayEndpoint) {
+        failedUntil[ep.id] = System.currentTimeMillis() + CfModes.FREEZE_PENALTY_MS
+        lastWin.remove(ep.id)
     }
 
     /**
@@ -351,6 +419,7 @@ class RelayPool(private val executor: ExecutorService) {
             }
         }
         failedUntil.clear()
+        lastWin.clear()
     }
 
     fun reset() {

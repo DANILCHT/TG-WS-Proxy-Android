@@ -23,6 +23,8 @@ class WsHandshakeError(
 class RawWebSocket private constructor(
     private val socket: Socket,
     private val stream: SocketStream,
+    /** True for wss:// (TLS), false for plain ws://. */
+    val secure: Boolean,
 ) {
 
     companion object {
@@ -48,6 +50,8 @@ class RawWebSocket private constructor(
          *
          * [secure] = false is upstream's `--no-secure`: plain ws:// on port 80.
          * [verify] defaults to a full check, or chain-only when fronting.
+         * [splitFirstPacket] cuts the ClientHello (TLS) or the upgrade request
+         * (plain) so the name is never whole in one packet.
          */
         @Throws(Exception::class)
         fun connect(
@@ -61,6 +65,7 @@ class RawWebSocket private constructor(
             port: Int = if (secure) 443 else 80,
             verify: Tls.Verify? = null,
             connectTimeoutMs: Int = minOf(timeoutMs, 10_000),
+            splitFirstPacket: Boolean = Tls.fragmentByDefault,
         ): RawWebSocket {
             val serverName = sni ?: domain
 
@@ -72,11 +77,14 @@ class RawWebSocket private constructor(
                     connectTimeoutMs = connectTimeoutMs,
                     readTimeoutMs = timeoutMs,
                     bufferSize = bufferSize,
+                    fragmentHandshake = splitFirstPacket,
                     verify = verify ?: if (serverName == domain) Tls.Verify.FULL else Tls.Verify.CHAIN,
                     hostnameToVerify = serverName,
                 )
             } else {
-                Tls.connectPlain(host, port, connectTimeoutMs, bufferSize).also {
+                Tls.connectPlain(
+                    host, port, connectTimeoutMs, bufferSize, fragmentHandshake = splitFirstPacket,
+                ).also {
                     it.soTimeout = timeoutMs
                 }
             }
@@ -117,7 +125,7 @@ class RawWebSocket private constructor(
                 val statusCode = if (parts.size >= 2) parts[1].toIntOrNull() ?: 0 else 0
 
                 if (statusCode == 101) {
-                    return RawWebSocket(sock, stream)
+                    return RawWebSocket(sock, stream, secure)
                 }
 
                 val headers = HashMap<String, String>()
@@ -153,6 +161,11 @@ class RawWebSocket private constructor(
     private val output: OutputStream = socket.getOutputStream()
     private val frag = java.io.ByteArrayOutputStream()
 
+    /** Time of the last frame written, for keepalive pings. */
+    @Volatile
+    var lastSendNanos: Long = System.nanoTime()
+        private set
+
     val isBroken: Boolean
         get() = closed || socket.isClosed || socket.isInputShutdown || socket.isOutputShutdown
 
@@ -168,6 +181,7 @@ class RawWebSocket private constructor(
             output.write(frame)
             output.flush()
         }
+        lastSendNanos = System.nanoTime()
     }
 
     @Throws(Exception::class)
@@ -177,6 +191,22 @@ class RawWebSocket private constructor(
             for (p in parts) output.write(buildFrame(OP_BINARY, p, 0, p.size, mask = true))
             output.flush()
         }
+        lastSendNanos = System.nanoTime()
+    }
+
+    /**
+     * Sends an empty PING. Keeps idle sessions alive through Cloudflare (which
+     * drops a WebSocket after 100 s of silence) and mobile NATs.
+     */
+    @Throws(Exception::class)
+    fun ping() {
+        if (closed) return
+        val frame = buildFrame(OP_PING, ByteArray(0), 0, 0, mask = true)
+        synchronized(writeLock) {
+            output.write(frame)
+            output.flush()
+        }
+        lastSendNanos = System.nanoTime()
     }
 
     /** Returns the next application message, or null when the peer closed. */

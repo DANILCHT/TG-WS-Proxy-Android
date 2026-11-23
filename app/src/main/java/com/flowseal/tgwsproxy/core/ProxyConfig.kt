@@ -44,7 +44,11 @@ class ProxyConfig {
      */
     var mobileEvasion: Boolean = true
 
-    /** Upstream `disable_secure` (--no-secure): ws:// on port 80 for CF proxy/worker. */
+    /**
+     * Upstream `disable_secure` (--no-secure): ws:// on port 80 only for the CF
+     * proxy and Workers. Off means both TLS and plain HTTP are raced and the
+     * one that works on this network is remembered (see [CfModes]).
+     */
     var disableSecure: Boolean = false
 
     /** Upstream 1.10.4 verifies upstream TLS certificates; off for old devices. */
@@ -56,10 +60,13 @@ class ProxyConfig {
     /** Try relays before everything else and keep them warm for every DC. */
     var relayFirst: Boolean = false
 
-    /** Worker domains and relays combined into one ordered endpoint list. */
+    /**
+     * Relays and Worker domains combined into one endpoint list. A bare Worker
+     * domain yields a plain and a TLS endpoint, see [RelayEndpoint.parseWorkers].
+     */
     fun relayEndpoints(): List<RelayEndpoint> =
         RelayEndpoint.parseList(relays, defaultSecure = true) +
-            RelayEndpoint.parseList(cfproxyWorkerDomains, defaultSecure = !disableSecure)
+            RelayEndpoint.parseWorkers(cfproxyWorkerDomains, allowTls = !disableSecure)
 
     fun copy(): ProxyConfig {
         val c = ProxyConfig()

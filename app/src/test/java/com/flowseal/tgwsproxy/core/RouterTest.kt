@@ -83,6 +83,17 @@ class RouterTest {
     }
 
     @Test
+    fun cfKeepsUpToSixDomainModePairs() {
+        val r = routes(input(hasDirect = false, cf = 9, tcp = false))
+        assertEquals(List(RoutePlanner.MAX_CF_ATTEMPTS) { Route.CF }, r)
+        val plan = RoutePlanner.plan(input(hasDirect = false, cf = 6, tcp = false))
+        assertEquals((0 until 6).toList(), plan.map { it.index })
+        // Pairs follow each other closely: TLS starts right behind HTTP.
+        assertEquals(RoutePlanner.HEAD_START_MS, plan[1].delayMs)
+        assertEquals(RoutePlanner.HEAD_START_MS + RoutePlanner.SAME_ROUTE_STEP_MS, plan[2].delayMs)
+    }
+
+    @Test
     fun onlyTcpStartsImmediately() {
         val plan = RoutePlanner.plan(input(hasDirect = false, cf = 0))
         assertEquals(1, plan.size)

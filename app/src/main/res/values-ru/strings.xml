@@ -58,8 +58,8 @@
     <string name="field_dc_ip">Датацентры (DC:IP, через запятую)</string>
     <string name="hint_dc_ip">По умолчанию: 2:149.154.167.220, 4:149.154.167.220. Если не грузятся фото и видео — очистите поле.</string>
 
-    <string name="field_tls_split">Разрезать TLS-рукопожатие</string>
-    <string name="help_tls_split">Первый пакет соединения уходит двумя частями, так что имя домена оказывается разрезано пополам. Обходит фильтры, которые смотрят только на первый пакет, — обычный случай на мобильном интернете. Ничего не замедляет, можно держать включённым.</string>
+    <string name="field_tls_split">Разрезать первый пакет</string>
+    <string name="help_tls_split">Имя домена не уходит целиком в одном пакете: TLS-рукопожатие режется на две TLS-записи посередине имени, а HTTP-запрос (порт 80) — посередине заголовка Host. Обходит фильтры, которые разбирают только первый пакет или первую TLS-запись, — обычный случай у провайдеров и мобильных операторов. Ничего не замедляет, можно держать включённым.</string>
     <string name="field_tls_split_delay">Пауза между частями, мс</string>
     <string name="help_tls_split_delay">0 — отправить обе части сразу. 10–50 мс помогает против фильтров, которые собирают пакеты вместе, но добавляет эту задержку к каждому новому соединению.</string>
     <string name="field_fronting_first">Сразу подставлять нейтральный домен</string>
@@ -85,7 +85,7 @@
     <string name="help_cf_user_domain">Ваши собственные домены за Cloudflare вместо публичных. Требуют настройки на стороне Cloudflare.</string>
     <string name="field_cf_user_domain_hint">Домены через запятую</string>
     <string name="field_cf_worker">Резерв через Cloudflare Worker</string>
-    <string name="help_cf_worker">Канал через ваш собственный Cloudflare Worker (docs/CfWorker.md в десктопном проекте). Участвует в гонке маршрутов; свой relay можно указать в разделе «Обход белых списков».</string>
+    <string name="help_cf_worker">Канал через ваш собственный Cloudflare Worker (docs/CfWorker.md в десктопном проекте). Участвует в гонке маршрутов; домен без схемы пробуется и по TLS, и по обычному HTTP, рабочий вариант запоминается. Свой relay можно указать в разделе «Обход белых списков».</string>
     <string name="field_cf_worker_hint">Домены Worker через запятую</string>
 
     <string name="field_pool_size">Пул WebSocket-сессий на DC</string>
@@ -154,8 +154,8 @@
     <string name="field_relay_first">Relay в приоритете</string>
     <string name="help_relay_first">Сразу направлять Telegram через relay и держать готовое соединение для каждого датацентра. Включайте при белых списках или если relay просто самый быстрый путь. Иначе relay участвует в гонке маршрутов наравне с остальными и выигрывает, только если ответит первым.</string>
     <string name="action_relay_guide">Как поднять relay</string>
-    <string name="field_no_secure">CF через порт 80 без TLS</string>
-    <string name="help_no_secure">Подключаться к Cloudflare-прокси и Worker по обычному ws:// на порт 80 (режим «no secure» из десктопной версии). Помогает, когда TLS к Cloudflare фильтруется, а простой HTTP — нет. Трафик Telegram при этом остаётся зашифрованным.</string>
+    <string name="field_no_secure">Cloudflare только через порт 80</string>
+    <string name="help_no_secure">По умолчанию к Cloudflare-прокси и Worker одновременно пробуются TLS (порт 443) и обычный ws:// (порт 80), и приложение запоминает, что работает в этой сети: с 16.11 многие провайдеры режут именно TLS к Cloudflare. Включите, чтобы ходить только через порт 80 (режим «no secure» из десктопной версии). Трафик Telegram в любом случае остаётся зашифрованным.</string>
     <string name="field_verify_tls">Проверять TLS-сертификаты</string>
     <string name="help_verify_tls">Сверять сертификаты Telegram, Cloudflare и relay с системным хранилищем, как десктопная версия начиная с 1.10.4. Выключайте только на старых устройствах, если в логе ошибки сертификатов.</string>
     <string name="field_auto_install">Устанавливать обновления автоматически</string>

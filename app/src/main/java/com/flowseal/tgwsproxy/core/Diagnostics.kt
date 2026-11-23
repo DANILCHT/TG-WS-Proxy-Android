@@ -10,15 +10,18 @@ import java.util.concurrent.TimeUnit
 
 /**
  * One-shot connection diagnostics: probes each configured DC over TCP and
- * WebSocket (direct, then fronted), the relays, the CF fallback, and whether
- * the network only lets "whitelisted" destinations through. Then suggests
- * what to change. Runs on a background thread; see MainActivity for the UI.
+ * WebSocket (direct, then fronted), the relays and Workers, the Cloudflare
+ * fallback over both TLS and plain HTTP, and whether the network only lets
+ * "whitelisted" destinations through. Every WebSocket check goes all the way
+ * to a Telegram answer ([MtprotoProbe]). Then suggests what to change. Runs on
+ * a background thread; see MainActivity for the UI.
  */
 object Diagnostics {
 
     private const val TCP_TIMEOUT_MS = 3_000
-    private const val WS_TIMEOUT_MS = 5_000
-    private const val FRONT_TIMEOUT_MS = 5_000
+    private const val WS_TIMEOUT_MS = 6_000
+    private const val FRONT_TIMEOUT_MS = 6_000
+    private const val MAX_RELAYS = 6
 
     /**
      * Russian services that stay reachable when a mobile operator switches to
@@ -47,9 +50,11 @@ object Diagnostics {
         val cfOk: Boolean,
         /** Only well-known Russian services answer: whitelist mode. */
         val whitelistSuspected: Boolean,
+        val cfHttpOk: Boolean = false,
+        val cfTlsOk: Boolean = false,
     )
 
-    fun run(cfg: ProxyConfig): Report {
+    fun run(cfg: ProxyConfig, russian: Boolean = false): Report {
         val checks = ArrayList<Check>()
         checks.add(
             Check(
@@ -63,7 +68,6 @@ object Diagnostics {
         var directOk = false
         var frontedOk = false
         var relayOk = false
-        var cfOk = false
 
         val dcs = cfg.dcRedirects.toSortedMap()
         if (dcs.isEmpty()) {
@@ -80,110 +84,140 @@ object Diagnostics {
                 continue
             }
 
-            for (domain in Const.wsDomains(dc, false)) {
-                val t1 = System.nanoTime()
-                try {
-                    RawWebSocket.connect(
-                        host = ip, domain = domain, timeoutMs = WS_TIMEOUT_MS,
-                        bufferSize = cfg.bufferSize,
-                    ).close()
-                    directOk = true
-                    checks.add(Check("DC$dc WS", true, "direct via $domain in ${ms(t1)}ms"))
-                    break
-                } catch (e: WsHandshakeError) {
-                    if (e.isRedirect) {
-                        checks.add(Check("DC$dc WS", false, "$domain redirects to ${e.location}"))
-                        continue
-                    }
-                    checks.add(Check("DC$dc WS", false, "$domain: ${e.statusLine}"))
-                    break
-                } catch (e: Exception) {
-                    checks.add(Check("DC$dc WS", false, "$domain: ${shortErr(e)}"))
-                    break
-                }
+            val domain = Const.wsDomains(dc, false).first()
+            val t1 = System.nanoTime()
+            val direct = probeWs("direct via $domain", dc) {
+                RawWebSocket.connect(
+                    host = ip, domain = domain, timeoutMs = WS_TIMEOUT_MS,
+                    bufferSize = cfg.bufferSize,
+                )
             }
+            directOk = directOk || direct.ok
+            checks.add(Check("DC$dc WS", direct.ok, if (direct.ok) "${direct.detail} in ${ms(t1)}ms" else direct.detail))
 
-            if (!directOk) {
-                val domain = Const.wsDomains(dc, false).first()
+            if (!direct.ok) {
                 val t2 = System.nanoTime()
-                try {
+                val fronted = probeWs("neutral SNI", dc) {
                     RawWebSocket.connect(
                         host = ip, domain = domain, timeoutMs = FRONT_TIMEOUT_MS,
                         sni = cfg.frontingSni.ifBlank { ProxyConfig.DEFAULT_FRONTING_SNI },
                         bufferSize = cfg.bufferSize,
-                    ).close()
-                    frontedOk = true
-                    checks.add(Check("DC$dc fronted", true, "neutral SNI in ${ms(t2)}ms"))
-                } catch (e: Exception) {
-                    checks.add(Check("DC$dc fronted", false, shortErr(e)))
+                    )
+                }
+                frontedOk = frontedOk || fronted.ok
+                checks.add(Check("DC$dc fronted", fronted.ok, if (fronted.ok) "${fronted.detail} in ${ms(t2)}ms" else fronted.detail))
+            }
+        }
+
+        val pool = Executors.newFixedThreadPool(4)
+        try {
+            // Relays and Workers (both variants of a Worker), in parallel.
+            val endpoints = cfg.relayEndpoints().take(MAX_RELAYS)
+            val probeDc = 2
+            val dst = Const.DC_DEFAULT_IPS[probeDc]!!
+            val relayFutures = endpoints.map { ep ->
+                ep to pool.submit(Callable {
+                    val t0 = System.nanoTime()
+                    probeWs(ep.toString(), probeDc) {
+                        ep.connect(dst, probeDc, WS_TIMEOUT_MS, cfg.bufferSize)
+                    }.let { if (it.ok) Probe(true, "$ep in ${ms(t0)}ms") else it }
+                })
+            }
+            for ((_, f) in relayFutures) {
+                val r = runCatching { f.get(WS_TIMEOUT_MS * 3L, TimeUnit.MILLISECONDS) }
+                    .getOrElse { Probe(false, "timed out") }
+                relayOk = relayOk || r.ok
+                checks.add(Check("Relay", r.ok, r.detail))
+            }
+
+            // Cloudflare proxy: plain HTTP and TLS side by side, on up to two domains.
+            var cfHttpOk = false
+            var cfTlsOk = false
+            if (cfg.fallbackCfproxy) {
+                val firstDc = dcs.keys.firstOrNull() ?: 2
+                val bases = (cfg.cfproxyUserDomains.ifEmpty { Balancer.getDomainsForDc(firstDc) })
+                    .ifEmpty { ProxyConfig.CFPROXY_DEFAULT_DOMAINS.shuffled() }
+                    .take(2)
+                val modes = if (cfg.disableSecure) listOf(false) else listOf(false, true)
+                for (base in bases) {
+                    val host = "kws$firstDc.$base"
+                    val futures = modes.map { tls ->
+                        tls to pool.submit(Callable {
+                            val t0 = System.nanoTime()
+                            probeWs(host, firstDc) {
+                                RawWebSocket.connect(
+                                    host = host, domain = host, timeoutMs = WS_TIMEOUT_MS,
+                                    bufferSize = cfg.bufferSize, secure = tls,
+                                )
+                            }.let { if (it.ok) Probe(true, "Telegram answered via $host in ${ms(t0)}ms") else it }
+                        })
+                    }
+                    for ((tls, f) in futures) {
+                        val r = runCatching { f.get(WS_TIMEOUT_MS * 3L, TimeUnit.MILLISECONDS) }
+                            .getOrElse { Probe(false, "$host: timed out") }
+                        if (tls) cfTlsOk = cfTlsOk || r.ok else cfHttpOk = cfHttpOk || r.ok
+                        checks.add(Check(if (tls) "CF TLS:443" else "CF HTTP:80", r.ok, r.detail))
+                    }
+                    if (cfHttpOk || cfTlsOk) break
                 }
             }
-        }
 
-        val endpoints = cfg.relayEndpoints()
-        val probeDc = 2
-        val dst = Const.DC_DEFAULT_IPS[probeDc]!!
-        for (ep in endpoints.take(5)) {
-            val t0 = System.nanoTime()
-            try {
-                ep.connect(dst, probeDc, WS_TIMEOUT_MS, cfg.bufferSize).close()
-                relayOk = true
-                checks.add(Check("Relay", true, "$ep in ${ms(t0)}ms"))
-            } catch (e: WsHandshakeError) {
-                val hint = when (e.statusCode) {
-                    401, 403 -> " (wrong key?)"
-                    404 -> " (wrong path?)"
-                    429 -> " (daily limit)"
-                    else -> ""
-                }
-                checks.add(Check("Relay", false, "$ep: ${e.statusLine}$hint"))
-            } catch (e: Exception) {
-                checks.add(Check("Relay", false, "$ep: ${shortErr(e)}"))
-            }
-        }
-
-        // CF fallback reachability: plain TCP to the first known CF domain.
-        val firstDc = dcs.keys.firstOrNull() ?: 2
-        val cfDomain = Balancer.getDomainsForDc(firstDc).firstOrNull()?.let { "kws$firstDc.$it" }
-            ?: ProxyConfig.CFPROXY_DEFAULT_DOMAINS.firstOrNull()?.let { "kws$firstDc.$it" }
-        if (cfg.fallbackCfproxy && cfDomain != null) {
-            val t0 = System.nanoTime()
-            try {
-                RawWebSocket.connect(
-                    host = cfDomain, domain = cfDomain, timeoutMs = WS_TIMEOUT_MS,
-                    bufferSize = cfg.bufferSize, secure = !cfg.disableSecure,
-                ).close()
-                cfOk = true
-                checks.add(Check("CF fallback", true, "$cfDomain in ${ms(t0)}ms"))
-            } catch (e: Exception) {
-                checks.add(Check("CF fallback", false, "$cfDomain: ${shortErr(e)}"))
-            }
-        }
-
-        var whitelist = false
-        if (!directOk && !frontedOk && !cfOk && !relayOk) {
-            val allowed = probeAny(WHITELISTED_PROBES)
-            val control = probeAny(CONTROL_PROBES)
-            whitelist = allowed != null && control == null
-            checks.add(
-                Check(
-                    "Whitelist test",
-                    !whitelist,
-                    when {
-                        whitelist -> "only Russian services reachable ($allowed) — whitelist mode"
-                        allowed == null && control == null -> "nothing reachable at all"
-                        else -> "foreign hosts reachable (${control ?: "-"})"
-                    },
+            var whitelist = false
+            if (!directOk && !frontedOk && !cfHttpOk && !cfTlsOk && !relayOk) {
+                val allowed = probeAny(WHITELISTED_PROBES)
+                val control = probeAny(CONTROL_PROBES)
+                whitelist = allowed != null && control == null
+                checks.add(
+                    Check(
+                        "Whitelist test",
+                        !whitelist,
+                        when {
+                            whitelist -> "only Russian services reachable ($allowed) — whitelist mode"
+                            allowed == null && control == null -> "nothing reachable at all"
+                            else -> "foreign hosts reachable (${control ?: "-"})"
+                        },
+                    )
                 )
-            )
-        }
+            }
 
-        val outcome = Outcome(
-            tcpOk, directOk, frontedOk, endpoints.isNotEmpty(), relayOk, cfOk, whitelist,
-        )
-        val report = Report(checks, buildRecommendation(outcome))
-        Logger.i("Diagnostics:\n${report.text()}")
-        return report
+            val outcome = Outcome(
+                tcpOk, directOk, frontedOk, endpoints.isNotEmpty(), relayOk,
+                cfHttpOk || cfTlsOk, whitelist, cfHttpOk, cfTlsOk,
+            )
+            val report = Report(checks, buildRecommendation(outcome, russian))
+            Logger.i("Diagnostics:\n${report.text()}")
+            return report
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    private class Probe(val ok: Boolean, val detail: String)
+
+    /** Opens a WebSocket with [open] and asks Telegram for a resPQ through it. */
+    private fun probeWs(what: String, dc: Int, open: () -> RawWebSocket): Probe {
+        val ws = try {
+            open()
+        } catch (e: WsHandshakeError) {
+            val hint = when {
+                e.isRedirect -> " (redirects to ${e.location})"
+                e.statusCode == 401 || e.statusCode == 403 -> " (wrong key or blocked)"
+                e.statusCode == 404 -> " (wrong path?)"
+                e.statusCode == 429 -> " (daily limit)"
+                else -> ""
+            }
+            return Probe(false, "$what: ${e.statusLine}$hint")
+        } catch (e: Exception) {
+            return Probe(false, "$what: ${shortErr(e)}")
+        }
+        return try {
+            val err = MtprotoProbe.check(ws, dc, WS_TIMEOUT_MS)
+            if (err == null) Probe(true, what) else Probe(false, "$what: connected, but $err")
+        } catch (e: Exception) {
+            Probe(false, "$what: connected, but Telegram did not answer (${shortErr(e)})")
+        } finally {
+            ws.abort()
+        }
     }
 
     /** Returns the first host from [hosts] that accepts a TCP connection on 443. */
@@ -211,18 +245,54 @@ object Diagnostics {
      * Pure suggestion logic, kept separate so it is unit-testable without
      * touching the network.
      */
-    fun buildRecommendation(o: Outcome): String = when {
-        o.directOk -> "Direct route works — no evasion needed."
-        o.relayOk && o.whitelistSuspected -> "Whitelist mode — your relay works; enable \"Relay first\"."
-        o.relayOk -> "Direct is blocked, your relay works — enable \"Relay first\" for the lowest ping."
-        o.frontedOk -> "Direct is filtered, neutral SNI works — enable fronting-first."
-        o.cfOk -> "Direct is blocked — keep the CF fallback on, or add your own relay."
-        o.whitelistSuspected && o.relayConfigured ->
-            "Whitelist mode and the relay is unreachable — host it in a network your operator allows."
-        o.whitelistSuspected ->
-            "Whitelist mode: Telegram and Cloudflare are cut off. Only a relay on an allowed network helps — see \"Whitelist bypass\"."
-        o.tcpOk -> "TCP connects but TLS fails — enable the TLS split and a split delay."
-        else -> "Nothing reachable — check the network, VPN or lockdown mode."
+    fun buildRecommendation(o: Outcome, russian: Boolean = false): String {
+        fun t(en: String, ru: String) = if (russian) ru else en
+        return when {
+            o.directOk -> t(
+                "Direct route works — no evasion needed.",
+                "Прямой маршрут работает — обход не нужен.",
+            )
+            o.relayOk && o.whitelistSuspected -> t(
+                "Whitelist mode — your relay works; enable \"Relay first\".",
+                "Режим белых списков — ваш relay работает; включите «Relay в приоритете».",
+            )
+            o.relayOk -> t(
+                "Direct is blocked, your relay works — enable \"Relay first\" for the lowest ping.",
+                "Прямой путь закрыт, ваш relay работает — включите «Relay в приоритете» для меньшего пинга.",
+            )
+            o.frontedOk -> t(
+                "Direct is filtered, neutral SNI works — enable fronting-first.",
+                "Прямой путь фильтруется, нейтральный SNI проходит — включите «Сразу подставлять нейтральный домен».",
+            )
+            o.cfHttpOk && !o.cfTlsOk -> t(
+                "Direct is blocked and TLS to Cloudflare is filtered, but plain HTTP (port 80) works — the proxy switches to it automatically.",
+                "Прямой путь закрыт и TLS к Cloudflare режется, но обычный HTTP (порт 80) проходит — прокси сам переключается на него.",
+            )
+            o.cfTlsOk && !o.cfHttpOk -> t(
+                "Direct is blocked, Cloudflare works over TLS (port 80 is closed) — used automatically.",
+                "Прямой путь закрыт, Cloudflare работает по TLS (порт 80 закрыт) — используется автоматически.",
+            )
+            o.cfOk -> t(
+                "Direct is blocked — the Cloudflare (CF) fallback works.",
+                "Прямой путь закрыт — резерв через Cloudflare (CF) работает.",
+            )
+            o.whitelistSuspected && o.relayConfigured -> t(
+                "Whitelist mode and the relay is unreachable — host it in a network your operator allows.",
+                "Режим белых списков, а relay недоступен — разместите его в сети, которую пропускает оператор.",
+            )
+            o.whitelistSuspected -> t(
+                "Whitelist mode: Telegram and Cloudflare are cut off. Only a relay on an allowed network helps — see \"Whitelist bypass\".",
+                "Режим белых списков: Telegram и Cloudflare отрезаны. Поможет только relay в разрешённой сети — см. «Обход белых списков».",
+            )
+            o.tcpOk -> t(
+                "TCP connects but TLS fails — enable the packet split and a split delay.",
+                "TCP подключается, но TLS не проходит — включите разрез первого пакета и паузу между частями.",
+            )
+            else -> t(
+                "Nothing reachable — check the network, VPN or lockdown mode.",
+                "Ничего не доступно — проверьте сеть, VPN или режим блокировки без VPN.",
+            )
+        }
     }
 
     /** Old signature, kept for callers that only know the basic checks. */

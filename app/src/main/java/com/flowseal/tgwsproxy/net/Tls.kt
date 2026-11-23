@@ -93,6 +93,11 @@ object Tls {
     /**
      * Connects a plain TCP socket, routed around an active VPN when the user
      * asked for that. Used by the non-TLS fallbacks as well.
+     *
+     * With [fragmentHandshake] the first write (a TLS ClientHello or an HTTP
+     * request) is split, see [FragmentingSocket]. Not inside a VPN tunnel:
+     * nothing there can read the packets, and some VPN clients route by the
+     * name they sniff from the first one.
      */
     @Throws(Exception::class)
     fun connectPlain(
@@ -101,10 +106,13 @@ object Tls {
         connectTimeoutMs: Int,
         bufferSize: Int,
         fragmentHandshake: Boolean = false,
-    ): Socket = NetworkBinder.connect(host, port, connectTimeoutMs) {
-        val s = if (fragmentHandshake) FragmentingSocket(fragmentDelayMs) else Socket()
-        applySocketOpts(s, bufferSize)
-        s
+    ): Socket {
+        val split = fragmentHandshake && !NetworkBinder.insideVpn()
+        return NetworkBinder.connect(host, port, connectTimeoutMs) {
+            val s = if (split) FragmentingSocket(fragmentDelayMs) else Socket()
+            applySocketOpts(s, bufferSize)
+            s
+        }
     }
 
     /**

@@ -103,6 +103,32 @@ object NetworkBinder {
 
     fun isCellular(): Boolean = activeTransport() == "cellular"
 
+    @Volatile
+    private var vpnSeen = false
+
+    @Volatile
+    private var vpnSeenAt = 0L
+
+    /**
+     * True when upstream sockets end up inside an active VPN tunnel (bypass
+     * off, or refused by a lockdown VPN). Packet splitting is pointless there,
+     * and VPN clients that sniff the first packet to route by name break on it.
+     */
+    fun insideVpn(): Boolean = runCatching {
+        val ctx = appContext ?: return false
+        val now = System.currentTimeMillis()
+        val up = if (now - vpnSeenAt < CACHE_TTL_MS) {
+            vpnSeen
+        } else {
+            val cm = connectivity(ctx) ?: return false
+            vpnActive(cm).also {
+                vpnSeen = it
+                vpnSeenAt = now
+            }
+        }
+        up && pick() == null
+    }.getOrDefault(false)
+
     /**
      * Connects a socket from [factory], binding it to a non-VPN network when
      * one is needed. Falls back to an unbound socket if binding turns out to be

@@ -33,6 +33,10 @@ class Upstream(
     val onWin: () -> Unit = {},
     /** Offers a losing connection to a pool; true if it was taken. */
     private val recycle: (() -> Boolean)? = null,
+    /** WebSocket keepalive interval for the session, 0 = none. */
+    val keepaliveMs: Long = 0L,
+    /** Called with the finished session, for route-specific bookkeeping. */
+    val onEnd: (Bridge.Session) -> Unit = {},
 ) {
     fun discard() {
         if (runCatching { recycle?.invoke() == true }.getOrDefault(false)) return
@@ -158,6 +162,9 @@ object RoutePlanner {
 
     const val MAX_PER_ROUTE = 3
 
+    /** CF attempts are (domain, transport) pairs: up to 3 domains x TLS/HTTP. */
+    const val MAX_CF_ATTEMPTS = 6
+
     /** Head start of the first attempt when nothing is known about the network. */
     const val HEAD_START_MS = 700L
 
@@ -177,7 +184,7 @@ object RoutePlanner {
             else direct += listOf(Route.DIRECT, Route.FRONTED)
         }
         val relay = List(minOf(p.relayCount, MAX_PER_ROUTE)) { Route.RELAY }
-        val cf = List(minOf(p.cfCount, MAX_PER_ROUTE)) { Route.CF }
+        val cf = List(minOf(p.cfCount, MAX_CF_ATTEMPTS)) { Route.CF }
         val tcp = if (p.hasTcp) listOf(Route.TCP) else emptyList()
 
         val groups = ArrayList<MutableList<Route>>()
@@ -247,6 +254,19 @@ class Router(
 
         /** A session this short that received nothing means the route is black-holed. */
         private const val DEAD_SESSION_MS = 15_000L
+
+        /**
+         * Keepalive for sessions through Cloudflare and relays: Cloudflare
+         * closes a WebSocket after 100 s without traffic, mobile NATs sooner.
+         */
+        const val KEEPALIVE_MS = 40_000L
+
+        /** CF domains looked at per race; failed (domain, mode) pairs are skipped. */
+        private const val CF_DOMAINS_SCANNED = 8
+
+        /** Upstream bridge.py TCP fallback backoff: 30 s doubling up to an hour. */
+        private const val TCP_BACKOFF_INITIAL_MS = 30_000L
+        private const val TCP_BACKOFF_MAX_MS = 3_600_000L
     }
 
     private class AllRedirects(val dc: Int) : Exception("all WS domains redirected")
@@ -256,6 +276,8 @@ class Router(
     private val ipFailUntil = ConcurrentHashMap<String, Long>()
     private val preferred = ConcurrentHashMap<String, Pair<Route, Long>>()
     private val demotedUntil = ConcurrentHashMap<String, Long>()
+    private val tcpFailures = ConcurrentHashMap<String, Int>()
+    private val tcpRetryAfter = ConcurrentHashMap<String, Long>()
 
     /** Forget everything learned about the network (e.g. it just changed). */
     fun reset() {
@@ -264,6 +286,8 @@ class Router(
         ipFailUntil.clear()
         preferred.clear()
         demotedUntil.clear()
+        tcpFailures.clear()
+        tcpRetryAfter.clear()
     }
 
     fun blacklistSummary(now: Long): String {
@@ -339,10 +363,9 @@ class Router(
 
         // ------------------------------------------------------------- the race
         if (up == null) {
-            val cfDomains = if (config.fallbackCfproxy && !isTestDc) {
-                Balancer.getDomainsForDc(dc).take(RoutePlanner.MAX_PER_ROUTE)
-            } else emptyList()
+            val cfTargets = if (config.fallbackCfproxy && !isTestDc) cfTargets(dc, now) else emptyList()
             val relayList = if (fallbackDst != null) relayPool.availableEndpoints(endpoints) else emptyList()
+            val tcpReady = fallbackDst != null && now >= (tcpRetryAfter[fallbackDst] ?: 0L)
 
             val plan = RoutePlanner.plan(
                 RoutePlanner.Input(
@@ -350,8 +373,8 @@ class Router(
                     frontingFirst = config.frontingFirst,
                     relayCount = relayList.size,
                     relayFirst = config.relayFirst,
-                    cfCount = cfDomains.size,
-                    hasTcp = fallbackDst != null,
+                    cfCount = cfTargets.size,
+                    hasTcp = tcpReady,
                     preferred = pref,
                     demoted = demoted,
                 )
@@ -364,7 +387,7 @@ class Router(
                         sni = config.frontingSni.ifBlank { ProxyConfig.DEFAULT_FRONTING_SNI },
                     )
                     Route.RELAY -> relayList.getOrNull(p.index)?.let { relayAttempt(p, it, fallbackDst!!, dc, isTestDc, endpoints) }
-                    Route.CF -> cfDomains.getOrNull(p.index)?.let { cfAttempt(p, it, dc) }
+                    Route.CF -> cfTargets.getOrNull(p.index)?.let { (base, tls) -> cfAttempt(p, base, tls, dc) }
                     Route.TCP -> tcpAttempt(p, fallbackDst!!)
                     Route.POOL -> null
                 }
@@ -396,7 +419,9 @@ class Router(
                 } else null
                 chosen.ws.setReadTimeout(0)
                 chosen.ws.send(relayInit)
-                Bridge.bridgeWsReencrypt(client, chosen.ws, label, ctx, dc, isMedia, splitter)
+                Bridge.bridgeWsReencrypt(
+                    client, chosen.ws, label, ctx, dc, isMedia, splitter, chosen.keepaliveMs,
+                )
             } else {
                 val remote = SocketStream(chosen.tcp!!, 32 * 1024)
                 remote.write(relayInit)
@@ -408,6 +433,44 @@ class Router(
             throw e
         }
         onSessionEnd(label, dcKey, chosen.route, session)
+        runCatching { chosen.onEnd(session) }
+    }
+
+    /**
+     * (base domain, tls) pairs for the CF part of the race, best first: per
+     * domain the mode [CfModes] prefers, then the other one; pairs that failed
+     * recently are skipped. When every pair is cooling down, one probe in the
+     * preferred mode is still made rather than leaving CF out entirely.
+     */
+    private fun cfTargets(dc: Int, now: Long): List<Pair<String, Boolean>> {
+        val allowTls = !config.disableSecure
+        val bases = Balancer.getDomainsForDc(dc)
+        val out = ArrayList<Pair<String, Boolean>>(RoutePlanner.MAX_CF_ATTEMPTS)
+        for (base in bases.take(CF_DOMAINS_SCANNED)) {
+            for (tls in CfModes.modesFor(base, allowTls, true, now)) {
+                if (out.size < RoutePlanner.MAX_CF_ATTEMPTS) out.add(base to tls)
+            }
+            if (out.size >= RoutePlanner.MAX_CF_ATTEMPTS) break
+        }
+        if (out.isEmpty() && bases.isNotEmpty()) {
+            out.add(bases.first() to CfModes.preferredMode(allowTls, true, now))
+        }
+        return out
+    }
+
+    /** Freeze detection for TLS sessions through Cloudflare, see [CfModes]. */
+    private fun checkTlsFreeze(label: String, what: String, s: Bridge.Session): Boolean {
+        if (!CfModes.looksFrozen(s.downBytes, s.upBytes, s.durationMs)) return false
+        if (CfModes.reportTlsFreeze()) {
+            Logger.w(
+                "[$label] $what over TLS stalled after ${Const.humanBytes(s.downBytes)}: " +
+                    "the network throttles TLS to Cloudflare -> plain HTTP first for " +
+                    "${CfModes.FREEZE_PENALTY_MS / 60_000} min"
+            )
+        } else {
+            Logger.d("[$label] $what over TLS ended after ${Const.humanBytes(s.downBytes)} (possible freeze)")
+        }
+        return true
     }
 
     // --------------------------------------------------------------- attempts
@@ -464,35 +527,75 @@ class Router(
                 relayPool.reportSuccess(ep)
                 if (!isTestDc) relayPool.ensureWarm(dc, dst, all)
             },
+            keepaliveMs = KEEPALIVE_MS,
+            onEnd = { s -> onRelaySessionEnd(ep, s) },
         )
     }
 
-    private fun cfAttempt(p: RoutePlanner.Planned, base: String, dc: Int): Attempt {
+    /** A Worker over TLS freezing like the CF proxy does: let its plain twin lead. */
+    private fun onRelaySessionEnd(ep: RelayEndpoint, s: Bridge.Session) {
+        if (!ep.cloudflare || !ep.secure) return
+        if (checkTlsFreeze("relay", "Worker", s)) relayPool.reportFrozen(ep)
+    }
+
+    private fun cfAttempt(p: RoutePlanner.Planned, base: String, tls: Boolean, dc: Int): Attempt {
         val domain = "kws$dc.$base"
-        return Attempt(Route.CF, domain, p.delayMs) {
-            val ws = RawWebSocket.connect(
-                host = domain, domain = domain, timeoutMs = HANDSHAKE_TIMEOUT_MS,
-                bufferSize = config.bufferSize, secure = !config.disableSecure,
-                connectTimeoutMs = CONNECT_TIMEOUT_MS,
-            )
+        val mode = if (tls) "tls" else "http"
+        return Attempt(Route.CF, "$domain $mode", p.delayMs) {
+            val ws = try {
+                RawWebSocket.connect(
+                    host = domain, domain = domain, timeoutMs = HANDSHAKE_TIMEOUT_MS,
+                    bufferSize = config.bufferSize, secure = tls,
+                    connectTimeoutMs = CONNECT_TIMEOUT_MS,
+                )
+            } catch (e: Exception) {
+                CfModes.reportFailure(base, tls)
+                throw e
+            }
             Upstream(
-                Route.CF, domain, ws = ws, useSplitter = true,
+                Route.CF, "$domain ($mode)", ws = ws, useSplitter = true,
                 onWin = {
+                    CfModes.reportSuccess(base, tls)
                     if (Balancer.updateDomainForDc(dc, base)) Logger.i("Switched active CF domain for DC$dc")
                 },
+                keepaliveMs = KEEPALIVE_MS,
+                onEnd = { s -> if (tls) checkTlsFreeze("DC$dc", "CF proxy", s) },
             )
         }
     }
 
     private fun tcpAttempt(p: RoutePlanner.Planned, dst: String): Attempt =
         Attempt(Route.TCP, "$dst:443", p.delayMs) {
-            val s = Tls.connectPlain(dst, 443, CONNECT_TIMEOUT_MS, config.bufferSize)
-            Upstream(Route.TCP, "$dst:443", tcp = s)
+            val s = try {
+                Tls.connectPlain(dst, 443, CONNECT_TIMEOUT_MS, config.bufferSize)
+            } catch (e: Exception) {
+                val failures = (tcpFailures[dst] ?: 0) + 1
+                tcpFailures[dst] = failures
+                val delay = minOf(
+                    TCP_BACKOFF_INITIAL_MS * (1L shl minOf(failures - 1, 7)),
+                    TCP_BACKOFF_MAX_MS,
+                )
+                tcpRetryAfter[dst] = System.currentTimeMillis() + delay
+                Logger.d("TCP fallback to $dst:443 failed ($e); retry in ${delay / 1000}s")
+                throw e
+            }
+            Upstream(
+                Route.TCP, "$dst:443", tcp = s,
+                onWin = {
+                    tcpFailures.remove(dst)
+                    tcpRetryAfter.remove(dst)
+                },
+            )
         }
 
     private fun relayFromPool(dc: Int, dst: String, endpoints: List<RelayEndpoint>): Upstream? {
         val pooled = relayPool.get(dc, dst, endpoints) ?: return null
-        return Upstream(Route.RELAY, "${pooled.endpoint} (pooled)", ws = pooled.ws, useSplitter = false)
+        val ep = pooled.endpoint
+        return Upstream(
+            Route.RELAY, "$ep (pooled)", ws = pooled.ws, useSplitter = false,
+            keepaliveMs = KEEPALIVE_MS,
+            onEnd = { s -> onRelaySessionEnd(ep, s) },
+        )
     }
 
     // ------------------------------------------------------------ bookkeeping

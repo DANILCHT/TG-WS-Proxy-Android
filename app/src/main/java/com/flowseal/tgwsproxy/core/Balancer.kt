@@ -25,6 +25,13 @@ object Balancer {
         return true
     }
 
+    /** True when [host] is one of the CF proxy domains or a subdomain of one. */
+    @Synchronized
+    fun covers(host: String): Boolean {
+        val h = host.lowercase().trimEnd('.')
+        return domains.any { d -> h == d || h.endsWith(".$d") }
+    }
+
     /** Active domain first, then the rest shuffled. */
     @Synchronized
     fun getDomainsForDc(dcId: Int): List<String> {
